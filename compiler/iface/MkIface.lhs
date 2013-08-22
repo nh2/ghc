@@ -879,17 +879,18 @@ mkOrphMap get_key decls
 \begin{code}
 mkUsageInfo :: HscEnv -> Module -> ImportedMods -> NameSet -> [FilePath] -> IO [Usage]
 mkUsageInfo hsc_env this_mod dir_imp_mods used_names dependent_files
-  = do  { eps <- hscEPS hsc_env
-    ; mtimes <- mapM getModificationUTCTime dependent_files
-        ; let mod_usages = mk_mod_usage_info (eps_PIT eps) hsc_env this_mod
-                                     dir_imp_mods used_names
-        ; let usages = mod_usages ++ map to_file_usage (zip dependent_files mtimes)
-        ; usages `seqList`  return usages }
-         -- seq the list of Usages returned: occasionally these
-         -- don't get evaluated for a while and we can end up hanging on to
-         -- the entire collection of Ifaces.
-   where
-     to_file_usage (f, mtime) = UsageFile { usg_file_path = f, usg_mtime = mtime }
+  = do
+    eps <- hscEPS hsc_env
+    hashes <- mapM getFileHash dependent_files
+    let mod_usages = mk_mod_usage_info (eps_PIT eps) hsc_env this_mod
+                                       dir_imp_mods used_names
+    let usages = mod_usages ++ [ UsageFile { usg_file_path = f
+                                           , usg_file_hash = hash }
+                               | (f, hash) <- zip dependent_files hashes ]
+    usages `seqList` return usages
+    -- seq the list of Usages returned: occasionally these
+    -- don't get evaluated for a while and we can end up hanging on to
+    -- the entire collection of Ifaces.
 
 mk_mod_usage_info :: PackageIfaceTable
               -> HscEnv
@@ -1338,11 +1339,11 @@ checkModUsage this_pkg UsageHomeModule{
  
 
 checkModUsage _this_pkg UsageFile{ usg_file_path = file,
-                                   usg_mtime = old_mtime } =
+                                   usg_file_hash = old_hash } =
   liftIO $
     handleIO handle $ do
-      new_mtime <- getModificationUTCTime file
-      if (old_mtime /= new_mtime)
+      new_hash <- getFileHash file
+      if (old_hash /= new_hash)
          then return recomp
          else return UpToDate
  where

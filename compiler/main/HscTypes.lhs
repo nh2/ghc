@@ -1645,7 +1645,7 @@ data Usage
     }                                           -- ^ Module from the current package
   | UsageFile {
         usg_file_path  :: FilePath,
-        usg_mtime      :: UTCTime
+        usg_file_hash  :: Fingerprint
         -- ^ External file dependency. From a CPP #include or TH addDependentFile. Should be absolute.
   }
     deriving( Eq )

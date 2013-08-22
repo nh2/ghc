@@ -629,7 +629,7 @@ instance Binary Usage where
     put_ bh usg@UsageFile{} = do 
         putByte bh 2
         put_ bh (usg_file_path usg)
-        put_ bh (usg_mtime     usg)
+        put_ bh (usg_file_hash usg)
 
     get bh = do
         h <- getByte bh
@@ -649,8 +649,8 @@ instance Binary Usage where
                      usg_exports = exps, usg_entities = ents, usg_safe = safe }
           2 -> do
             fp    <- get bh
-            mtime <- get bh
-            return UsageFile { usg_file_path = fp, usg_mtime = mtime }
+            hash  <- get bh
+            return UsageFile { usg_file_path = fp, usg_file_hash = hash }
           i -> error ("Binary.get(Usage): " ++ show i)
 
 instance Binary Warnings where
