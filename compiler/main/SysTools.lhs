@@ -38,6 +38,7 @@ module SysTools (
         copyWithHeader,
 
         -- Temporary-file management
+        getTempDir,
         setTmpDir,
         newTempName,
         cleanTempDirs, cleanTempFiles, cleanTempFilesExcept,

@@ -1553,10 +1553,11 @@ runPhase_MoveBinary dflags input_fn
         return True
     | otherwise = return True
 
-mkExtraObj :: DynFlags -> Suffix -> String -> IO FilePath
-mkExtraObj dflags extn xs
- = do cFile <- newTempName dflags extn
-      oFile <- newTempName dflags "o"
+mkExtraObj :: DynFlags -> String -> String -> IO FilePath
+mkExtraObj dflags filename xs
+ = do tmpDir <- getTempDir dflags
+      let cFile = tmpDir </> filename
+          oFile = replaceExtension cFile "o"
       writeFile cFile xs
       let rtsDetails = getPackageDetails dflags rtsPackageKey
       SysTools.runCc dflags
@@ -1580,7 +1581,7 @@ mkExtraObjToLinkIntoBinary dflags = do
           (text "Warning: -rtsopts and -with-rtsopts have no effect with -no-hs-main." $$
            text "    Call hs_init_ghc() from your main() function to set these options.")
 
-   mkExtraObj dflags "c" (showSDoc dflags main)
+   mkExtraObj dflags "ghc-main-wrapper.c" (showSDoc dflags main)
 
   where
     main
@@ -1612,7 +1613,7 @@ mkNoteObjsToLinkIntoBinary dflags dep_packages = do
    link_info <- getLinkInfo dflags dep_packages
 
    if (platformSupportsSavingLinkOpts (platformOS (targetPlatform dflags)))
-     then fmap (:[]) $ mkExtraObj dflags "s" (showSDoc dflags (link_opts link_info))
+     then fmap (:[]) $ mkExtraObj dflags "ghc-link-info.s" (showSDoc dflags (link_opts link_info))
      else return []
 
   where
