@@ -124,19 +124,28 @@ tcRnModule :: HscEnv
 
 tcRnModule hsc_env hsc_src save_rn_syntax
    parsedModule@HsParsedModule {hpm_module=L loc this_module}
+ | RealSrcSpan real_loc <- loc
  = do { showPass (hsc_dflags hsc_env) "Renamer/typechecker" ;
 
-      ; let { this_pkg = thisPackage (hsc_dflags hsc_env)
-            ; pair@(this_mod,_)
-                = case hsmodName this_module of
-                    Nothing -- 'module M where' is omitted
-                        ->  (mAIN, srcLocSpan (srcSpanStart loc))
+      ; initTc hsc_env hsc_src save_rn_syntax this_mod real_loc $
+               tcRnModuleTcRnM hsc_env hsc_src parsedModule pair }
 
-                    Just (L mod_loc mod)  -- The normal case
-                        -> (mkModule this_pkg mod, mod_loc) } ;
+  | otherwise
+  = return ((emptyBag, unitBag err_msg), Nothing)
 
-      ; initTc hsc_env hsc_src save_rn_syntax this_mod $
-        tcRnModuleTcRnM hsc_env hsc_src parsedModule pair }
+  where
+    err_msg = mkPlainErrMsg (hsc_dflags hsc_env) loc $
+              text "Module does not have a RealSrcSpan:" <+> ppr this_mod
+
+    this_pkg = thisPackage (hsc_dflags hsc_env)
+
+    pair :: (Module, SrcSpan)
+    pair@(this_mod,_)
+      | Just (L mod_loc mod) <- hsmodName this_module
+      = (mkModule this_pkg mod, mod_loc)
+
+      | otherwise   -- 'module M where' is omitted
+      = (mAIN, srcLocSpan (srcSpanStart loc))
 
 tcRnModuleTcRnM :: HscEnv
                 -> HscSource
@@ -321,7 +330,9 @@ tcRnExtCore hsc_env (HsExtCore this_mod decls src_binds)
         -- The decls are IfaceDecls; all names are original names
  = do { showPass (hsc_dflags hsc_env) "Renamer/typechecker" ;
 
-   initTc hsc_env ExtCoreFile False this_mod $ do {
+   let { external_core_src_loc = realSrcLocSpan $ mkRealSrcLoc (fsLit "<external core>") 1 1 } ;
+
+   initTc hsc_env ExtCoreFile False this_mod external_core_src_loc $ do {
 
    let { ldecls  = map noLoc decls } ;
 
@@ -1784,7 +1795,8 @@ tcRnExpr :: HscEnv
          -> IO (Messages, Maybe Type)
 -- Type checks the expression and returns its most general type
 tcRnExpr hsc_env rdr_expr
-  = runTcInteractive hsc_env $ do {
+  = runTcInteractive hsc_env $
+    do {
 
     (rn_expr, _fvs) <- rnLExpr rdr_expr ;
     failIfErrsM ;
@@ -1927,9 +1939,10 @@ getModuleInterface hsc_env mod
   = runTcInteractive hsc_env $
     loadModuleInterface (ptext (sLit "getModuleInterface")) mod
 
-tcRnLookupRdrName :: HscEnv -> RdrName -> IO (Messages, Maybe [Name])
-tcRnLookupRdrName hsc_env rdr_name
+tcRnLookupRdrName :: HscEnv -> Located RdrName -> IO (Messages, Maybe [Name])
+tcRnLookupRdrName hsc_env (L loc rdr_name)
   = runTcInteractive hsc_env $
+    setSrcSpan loc           $
     lookup_rdr_name rdr_name
 
 lookup_rdr_name :: RdrName -> TcM [Name]
