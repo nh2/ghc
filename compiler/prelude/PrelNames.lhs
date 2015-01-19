@@ -312,6 +312,10 @@ basicKnownKeyNames
         -- Implicit parameters
         ipClassName,
 
+        -- Source locations
+        callStackDataConName, callStackTyConName,
+        srcLocDataConName,
+
         -- Annotation type checking
         toAnnotationWrapperName
 
@@ -440,6 +444,12 @@ gHC_IP          = mkBaseModule (fsLit "GHC.IP")
 
 gHC_PARR' :: Module
 gHC_PARR' = mkBaseModule (fsLit "GHC.PArr")
+
+gHC_SRCLOC :: Module
+gHC_SRCLOC = mkBaseModule (fsLit "GHC.SrcLoc")
+
+gHC_STACK :: Module
+gHC_STACK = mkBaseModule (fsLit "GHC.Stack")
 
 mAIN, rOOT_MAIN :: Module
 mAIN            = mkMainModule_ mAIN_NAME
@@ -1160,6 +1170,14 @@ knownSymbolClassName  = clsQual gHC_TYPELITS (fsLit "KnownSymbol") knownSymbolCl
 ipClassName :: Name
 ipClassName         = clsQual gHC_IP (fsLit "IP")      ipClassNameKey
 
+-- Source Locations
+callStackDataConName, callStackTyConName, srcLocDataConName :: Name
+callStackDataConName
+  = conName gHC_STACK (fsLit "CallStack") callStackDataConKey
+callStackTyConName
+  = tcQual  gHC_STACK (fsLit "CallStack") callStackTyConKey
+srcLocDataConName
+  = conName gHC_SRCLOC (fsLit "SrcLoc")   srcLocDataConKey
 
 
 -- dotnet interop
@@ -1510,6 +1528,9 @@ proxyPrimTyConKey = mkPreludeTyConUnique 176
 specTyConKey :: Unique
 specTyConKey = mkPreludeTyConUnique 177
 
+callStackTyConKey :: Unique
+callStackTyConKey = mkPreludeTyConUnique 182
+
 ---------------- Template Haskell -------------------
 --      USES TyConUniques 200-299
 -----------------------------------------------------
@@ -1576,6 +1597,10 @@ integerGmpSDataConKey                   = mkPreludeDataConUnique 30
 integerGmpJDataConKey                   = mkPreludeDataConUnique 31
 
 coercibleDataConKey                     = mkPreludeDataConUnique 32
+
+callStackDataConKey, srcLocDataConKey :: Unique
+callStackDataConKey                     = mkPreludeDataConUnique 36
+srcLocDataConKey                        = mkPreludeDataConUnique 37
 \end{code}
 
 %************************************************************************

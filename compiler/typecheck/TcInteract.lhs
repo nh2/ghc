@@ -7,6 +7,8 @@ module TcInteract (
 #include "HsVersions.h"
 
 import BasicTypes ()
+import HsTypes ( hsIPNameFS )
+import FastString
 import TcCanonical
 import VarSet
 import Type
@@ -16,7 +18,8 @@ import CoAxiom(sfInteractTop, sfInteractInert)
 
 import Var
 import TcType
-import PrelNames (knownNatClassName, knownSymbolClassName, ipClassNameKey )
+import PrelNames (knownNatClassName, knownSymbolClassName, ipClassNameKey
+                 , callStackTyConKey )
 import TysWiredIn ( coercibleClass )
 import Id( idType, mkSysLocalM )
 import Class
@@ -45,7 +48,6 @@ import VarEnv
 import Control.Monad( when, unless, forM )
 import Pair (Pair(..))
 import Unique( hasKey )
-import FastString ( sLit, fsLit )
 import DynFlags
 import Util
 \end{code}
@@ -366,6 +368,27 @@ interactIrred _ wi = pprPanic "interactIrred" (ppr wi)
 \begin{code}
 interactDict :: InertCans -> Ct -> TcS (Maybe InertCans, StopNowFlag)
 interactDict inerts workItem@(CDictCan { cc_ev = ev_w, cc_class = cls, cc_tyargs = tys })
+  -- don't ever try to solve CallStack IPs directly from other dicts,
+  -- we always build new dicts instead.
+  -- See Note [Overview of implicit CallStacks]
+  | [_ip, ty] <- tys
+  , isWanted ev_w
+  , Just mkEvCs <- isCallStackIP (ctev_loc ev_w) cls ty
+  = do let ev_cs =
+             case ctEvidence `fmap` findDict (inert_dicts inerts) cls tys of
+               Just ev | isGiven ev -> mkEvCs (ctEvTerm ev)
+               _ -> mkEvCs (EvCallStack EvCsEmpty)
+
+       -- now we have ev_cs :: CallStack, but the evidence term should
+       -- be a dictionary, so we have to coerce ev_cs to a
+       -- dictionary for `IP ip CallStack`
+       let ip_ty = mkClassPred cls tys
+       let ev_tm = mkEvCast (EvCallStack ev_cs) (coercionToTcCoercion $ wrapIP ip_ty)
+       addSolvedDict ev_w cls tys
+       setEvBind (ctEvId ev_w) ev_tm
+       -- stopWith ev_w "Wanted CallStack IP"
+       return (Nothing, True)
+
   | let dicts = inert_dicts inerts
   , Just ct_i <- findDict (inert_dicts inerts) cls tys
   , let ctev_i = ctEvidence ct_i
@@ -2028,6 +2051,25 @@ requestCoercible loc ty1 ty2 =
     newWantedEvVarNonrec loc' (mkCoerciblePred ty1 ty2)
   where loc' = bumpCtLocDepth CountConstraints loc
 
+-- | Is the constraint for an implicit CallStack parameter?
+isCallStackIP :: CtLoc -> Class -> Type -> Maybe (EvTerm -> EvCallStack)
+isCallStackIP loc cls ty
+  | Just (tc, []) <- splitTyConApp_maybe ty
+  , cls `hasKey` ipClassNameKey && tc `hasKey` callStackTyConKey
+  = occOrigin (ctLocOrigin loc)
+  where
+  -- We only want to grab constraints that arose due to the use of an IP or a
+  -- function call. See Note [Overview of implicit CallStacks]
+  occOrigin (OccurrenceOf n)
+    = Just (EvCsPushCall n locSpan)
+  occOrigin (IPOccOrigin n)
+    = Just (EvCsTop ('?' `consFS` hsIPNameFS n) locSpan)
+  occOrigin _
+    = Nothing
+  locSpan
+    = ctLocSpan loc
+isCallStackIP _ _ _
+  = Nothing
 \end{code}
 
 Note [Coercible Instances]
