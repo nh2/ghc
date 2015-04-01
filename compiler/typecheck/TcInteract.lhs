@@ -383,7 +383,7 @@ interactDict inerts workItem@(CDictCan { cc_ev = ev_w, cc_class = cls, cc_tyargs
        -- be a dictionary, so we have to coerce ev_cs to a
        -- dictionary for `IP ip CallStack`
        let ip_ty = mkClassPred cls tys
-       let ev_tm = mkEvCast (EvCallStack ev_cs) (coercionToTcCoercion $ wrapIP ip_ty)
+       let ev_tm = mkEvCast (EvCallStack ev_cs) (wrapIPTc ip_ty)
        addSolvedDict ev_w cls tys
        setEvBind (ctEvId ev_w) ev_tm
        -- stopWith ev_w "Wanted CallStack IP"

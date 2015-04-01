@@ -247,8 +247,8 @@ tcLocalBinds (HsIPBinds (IPBinds ip_binds _)) thing_inside
 
     -- Coerces a `t` into a dictionry for `IP "x" t`.
     -- co : t -> IP "x" t
-    toDict ipClass x ty = HsWrap $ mkWpCast $ coercionToTcCoercion $
-                          wrapIP $ mkClassPred ipClass [x,ty]
+    toDict ipClass x ty = HsWrap $ mkWpCast $
+                          wrapIPTc $ mkClassPred ipClass [x,ty]
 
 
 \end{code}

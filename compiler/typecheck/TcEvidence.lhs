@@ -29,7 +29,8 @@ module TcEvidence (
   isTcReflCo, isTcReflCo_maybe, getTcCoVar_maybe,
   tcCoercionRole, eqVarRole,
   coercionToTcCoercion,
-  unwrapIP, wrapIP
+  unwrapIP, wrapIP,
+  wrapIPTc,
   ) where
 #include "HsVersions.h"
 
@@ -968,4 +969,7 @@ unwrapIP ty =
 -- dictionary. See 'unwrapIP'.
 wrapIP :: Type -> Coercion
 wrapIP ty = mkSymCo (unwrapIP ty)
+
+wrapIPTc :: Type -> TcCoercion
+wrapIPTc ty = mkTcSymCo (coercionToTcCoercion (unwrapIP ty))
 \end{code}
