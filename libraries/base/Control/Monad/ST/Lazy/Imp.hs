@@ -42,7 +42,7 @@ import qualified Control.Monad.ST as ST
 import qualified Control.Monad.ST.Unsafe as ST
 
 import qualified GHC.ST as GHC.ST
-import GHC.Base
+import GHC.Base ( RealWorld, State#, ap, realWorld# )
 
 -- | The lazy state-transformer monad.
 -- A computation of type @'ST' s a@ transforms an internal state indexed

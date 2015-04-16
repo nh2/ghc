@@ -41,6 +41,7 @@ import Outputable
 import FastTypes
 import FastString
 import Module           ( PackageKey )
+import qualified GHC.Base
 
 {-
 ************************************************************************
@@ -64,7 +65,18 @@ primOpTag op = iBox (tagOf_PrimOp op)
 -- supplies
 -- tagOf_PrimOp :: PrimOp -> FastInt
 #include "primop-tag.hs-incl"
-tagOf_PrimOp _ = error "tagOf_PrimOp: unknown primop"
+tagOf_PrimOp _ = GHC.Base.error "tagOf_PrimOp: unknown primop"
+
+-- NOTE:
+-- Using GHC.Base.error above, otherwise we get:
+--     compiler/prelude/PrimOp.hs:67:18:
+--         Couldn't match kind ‘*’ with ‘#’
+--         When matching types
+--           a0 :: *
+--           FastInt :: #
+--         In the expression: error "tagOf_PrimOp: unknown primop"
+--         In an equation for ‘tagOf_PrimOp’:
+--             tagOf_PrimOp _ = error "tagOf_PrimOp: unknown primop"
 
 
 instance Eq PrimOp where

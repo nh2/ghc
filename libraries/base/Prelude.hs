@@ -1,5 +1,6 @@
 {-# LANGUAGE Trustworthy #-}
 {-# LANGUAGE NoImplicitPrelude #-}
+{-# LANGUAGE ImplicitParams #-}
 
 -----------------------------------------------------------------------------
 -- |
@@ -163,10 +164,25 @@ import Data.Maybe
 import Data.Traversable ( Traversable(..) )
 import Data.Tuple
 
-import GHC.Base hiding ( foldr, mapM, sequence )
+import GHC.Base hiding ( error, foldr, mapM, sequence, undefined )
+import qualified GHC.Base
 import Text.Read
 import GHC.Enum
 import GHC.Num
 import GHC.Real
 import GHC.Float
 import GHC.Show
+import {-# SOURCE #-} GHC.Stack ( CallStack, showCallStack )
+
+
+-- | 'error' stops execution and displays an error message.
+error :: (?callstack :: CallStack) => [Char] -> a
+error s = GHC.Base.error (s ++ "\n" ++ showCallStack ?callstack)
+
+
+-- | A special case of 'error'.
+-- It is expected that compilers will recognize this and insert error
+-- messages which are more appropriate to the context in which 'undefined'
+-- appears.
+undefined :: a
+undefined = error "Prelude.undefined"

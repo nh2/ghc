@@ -109,7 +109,7 @@ import GHC.Conc hiding (threadWaitRead, threadWaitWrite,
                         threadWaitReadSTM, threadWaitWriteSTM)
 import GHC.IO           ( unsafeUnmask )
 import GHC.IORef        ( newIORef, readIORef, writeIORef )
-import GHC.Base
+import GHC.Base         ( IO(..), (/=#), isTrue#, isCurrentThreadBound#, when )
 
 import System.Posix.Types ( Fd )
 import Foreign.StablePtr
