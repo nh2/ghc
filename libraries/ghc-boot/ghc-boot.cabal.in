@@ -40,6 +40,7 @@ Library
             GHC.LanguageExtensions.Type
             GHC.PackageDb
             GHC.Serialized
+            GHC.ForeignSrcLang
 
     build-depends: base       >= 4.7 && < 4.10,
                    binary     == 0.8.*,

@@ -86,11 +86,6 @@ def error_has(pattern):
     # the following fails only if both the command fails and the pattern is found
     return('bash -o pipefail -c \'! (! "$@" {swap12}) | grep {pattern} {swap12} &> /dev/null\' --'.format(**locals()))
 
-test('TH_addCStub1', normal, compile_and_run, ['-v0'])
-test('TH_addCStub2'
-     , [compile_cmd_prefix(error_has('TH_addCStub2.hs:13:'))]
-     , compile_fail, ['-v0'])
-
 test('TH_reifyMkName', normal, compile, ['-v0'])
 
 test('TH_reifyInstances', normal, compile, ['-v0'])
@@ -435,3 +430,4 @@ test('T12788', extra_clean(['T12788_Lib.hi', 'T12788_Lib.o']),
                multimod_compile_fail,
                ['T12788.hs', '-v0 ' + config.ghc_th_way_flags])
 test('T12993', normal, multimod_compile, ['T12993.hs', '-v0'])
+test('T13366', normal, compile_and_run, ['-lstdc++ -v0'])
