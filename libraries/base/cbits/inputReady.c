@@ -12,6 +12,9 @@
  * inputReady(fd) checks to see whether input is available on the file
  * descriptor 'fd'.  Input meaning 'can I safely read at least a
  * *character* from this file object without blocking?'
+ * Returns:
+ * 1 => Input ready, 0 => not ready, -1 => error.
+ * When -1, callers should check errno == EINTR and retry if so.
  */
 int
 fdReady(int fd, int write, int msecs, int isSock)
@@ -22,7 +25,7 @@ fdReady(int fd, int write, int msecs, int isSock)
 #else
     ( 1 ) {
 #endif
-	int maxfd, ready;
+	int maxfd;
 	fd_set rfd, wfd;
 	struct timeval tv;
         if ((fd >= (int)FD_SETSIZE) || (fd < 0)) {
@@ -44,15 +47,9 @@ fdReady(int fd, int write, int msecs, int isSock)
 	maxfd = fd + 1;
 	tv.tv_sec  = msecs / 1000;
 	tv.tv_usec = (msecs % 1000) * 1000;
-	
-	while ((ready = select(maxfd, &rfd, &wfd, NULL, &tv)) < 0 ) {
-	    if (errno != EINTR ) {
-		return -1;
-	    }
-	}
-	
-	/* 1 => Input ready, 0 => not ready, -1 => error */
-	return (ready);
+
+	/* Note that tv is not updated on non-Linux platforms. */
+	return select(maxfd, &rfd, &wfd, NULL, &tv);
     }
 #if defined(_WIN32)
     else {
