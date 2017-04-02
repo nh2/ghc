@@ -498,6 +498,9 @@ data TcGblEnv
 
         tcg_dependent_files :: TcRef [FilePath], -- ^ dependencies from addDependentFile
 
+        tcg_th_cstubs :: TcRef [String],
+        -- ^ C stubs from addCStub
+
 #ifdef GHCI
         tcg_th_topdecls :: TcRef [LHsDecl RdrName],
         -- ^ Top-level declarations from addTopDecls

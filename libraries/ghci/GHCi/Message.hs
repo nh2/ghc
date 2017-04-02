@@ -208,6 +208,7 @@ data Message a where
   QDone :: Message ()
   -- | RunTH threw an exception
   QException :: String -> Message ()
+  AddCStub :: String -> Message (THResult ())
   -- | RunTH called 'fail'
   QFail :: String -> Message ()
 
@@ -364,6 +365,7 @@ getMessage = do
       51 -> Msg <$> QException <$> get
       52 -> Msg <$> (RunModFinalizers <$> get <*> get)
       53 -> Msg <$> (AddModFinalizer <$> get)
+      55 -> Msg <$> (AddCStub <$> get)
       _  -> Msg <$> QFail <$> get
 
 putMessage :: Message a -> Put
@@ -422,6 +424,7 @@ putMessage m = case m of
   RunModFinalizers a b        -> putWord8 52 >> put a >> put b
   AddModFinalizer a           -> putWord8 53 >> put a
   QFail a                     -> putWord8 54 >> put a
+  AddCStub a                  -> putWord8 55 >> put a
 
 -- -----------------------------------------------------------------------------
 -- Reading/writing messages
