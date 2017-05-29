@@ -1706,15 +1706,18 @@ toIfUnfolding lb (CoreUnfolding { uf_tmpl = rhs
           -> case guidance of
                UnfWhen {ug_arity = arity, ug_unsat_ok = unsat_ok, ug_boring_ok =  boring_ok }
                       -> IfInlineRule arity unsat_ok boring_ok if_rhs
-               _other -> IfCoreUnfold True if_rhs
+               _other -> IfCoreUnfold True if_rhs size
         InlineCompulsory -> IfCompulsory if_rhs
-        InlineRhs        -> IfCoreUnfold False if_rhs
+        InlineRhs        -> IfCoreUnfold False if_rhs size
         -- Yes, even if guidance is UnfNever, expose the unfolding
         -- If we didn't want to expose the unfolding, TidyPgm would
         -- have stuck in NoUnfolding.  For supercompilation we want
         -- to see that unfolding!
   where
     if_rhs = toIfaceExpr rhs
+    size = case guidance of
+      UnfIfGoodArgs { ug_size = size } -> size
+      _ -> -1 -- TODO Maybe?
 
 toIfUnfolding lb (DFunUnfolding { df_bndrs = bndrs, df_args = args })
   = Just (HsUnfold lb (IfDFunUnfold (map toIfaceBndr bndrs) (map toIfaceExpr args)))

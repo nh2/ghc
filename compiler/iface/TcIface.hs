@@ -1218,7 +1218,7 @@ tcIdInfo ignore_prags name ty info
            ; return (info1 `setUnfoldingInfoLazily` unf) }
 
 tcUnfolding :: Name -> Type -> IdInfo -> IfaceUnfolding -> IfL Unfolding
-tcUnfolding name _ info (IfCoreUnfold stable if_expr)
+tcUnfolding name _ info (IfCoreUnfold stable if_expr _)
   = do  { dflags <- getDynFlags
         ; mb_expr <- tcPragExpr name if_expr
         ; let unf_src | stable    = InlineStable
