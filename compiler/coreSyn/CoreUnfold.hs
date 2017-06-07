@@ -102,6 +102,7 @@ mkWwInlineRule expr arity
   = mkCoreUnfolding InlineStable True
                    (simpleOptExpr expr)
                    (UnfWhen { ug_arity = arity, ug_unsat_ok = unSaturatedOk
+                            , ug_size_debug = Left "mkWwInlineRule"
                             , ug_boring_ok = boringCxtNotOk })
 
 mkCompulsoryUnfolding :: CoreExpr -> Unfolding
@@ -109,6 +110,7 @@ mkCompulsoryUnfolding expr         -- Used for things that absolutely must be un
   = mkCoreUnfolding InlineCompulsory True
                     (simpleOptExpr expr)
                     (UnfWhen { ug_arity = 0    -- Arity of unfolding doesn't matter
+                             , ug_size_debug = Left "mkCompulsoryUnfolding"
                              , ug_unsat_ok = unSaturatedOk, ug_boring_ok = boringCxtOk })
 
 mkWorkerUnfolding :: DynFlags -> (CoreExpr -> CoreExpr) -> Unfolding -> Unfolding
@@ -133,9 +135,11 @@ mkInlineUnfolding mb_arity expr
     expr' = simpleOptExpr expr
     guide = case mb_arity of
               Nothing    -> UnfWhen { ug_arity = manifestArity expr'
+                                    , ug_size_debug = Left "mkInlineUnfolding Nothing"
                                     , ug_unsat_ok = unSaturatedOk
                                     , ug_boring_ok = boring_ok }
               Just arity -> UnfWhen { ug_arity = arity
+                                    , ug_size_debug = Left "mkInlineUnfolding Just"
                                     , ug_unsat_ok = needSaturated
                                     , ug_boring_ok = boring_ok }
     boring_ok = inlineBoringOk expr'
@@ -168,10 +172,12 @@ specUnfolding _dflags subst new_bndrs spec_args
                              , uf_guidance = old_guidance })
  | isStableSource src  -- See Note [Specialising unfoldings]
  , UnfWhen { ug_arity = old_arity
+           , ug_size_debug = size
            , ug_unsat_ok = unsat_ok
            , ug_boring_ok = boring_ok } <- old_guidance
  = let guidance = UnfWhen { ug_arity = old_arity - count isValArg spec_args
                                      + count isId new_bndrs
+                          , ug_size_debug = size
                           , ug_unsat_ok = unsat_ok
                           , ug_boring_ok = boring_ok }
        new_tmpl = simpleOptExpr $ mkLams new_bndrs $
@@ -340,6 +346,7 @@ calcUnfoldingGuidance dflags expr
         | uncondInline expr n_val_bndrs size
         -> UnfWhen { ug_unsat_ok = unSaturatedOk
                    , ug_boring_ok =  boringCxtOk
+                   , ug_size_debug = Right size
                    , ug_arity = n_val_bndrs }   -- Note [INLINE for small functions]
         | otherwise
         -> UnfIfGoodArgs { ug_args  = map (mk_discount cased_bndrs) val_bndrs
@@ -961,6 +968,7 @@ certainlyWillInline dflags unf@(CoreUnfolding { uf_guidance = guidance, uf_tmpl 
          , size - (10 * (arity + 1)) <= ufUseThreshold dflags
          -> Just (unf { uf_src      = InlineStable
                       , uf_guidance = UnfWhen { ug_arity     = arity
+                                              , ug_size_debug = Right size
                                               , ug_unsat_ok  = unSaturatedOk
                                               , ug_boring_ok = inlineBoringOk expr } })
                 -- Note the "unsaturatedOk". A function like  f = \ab. a

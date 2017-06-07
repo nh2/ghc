@@ -309,7 +309,7 @@ data IfaceUnfolding
                                 -- Possibly could eliminate the Bool here, the information
                                 -- is also in the InlinePragma.
                  IfaceExpr      -- Expression in the unfolding
-                 Int            -- Size of the expression
+                 (Either String Int)            -- Size of the expression
 
   | IfCompulsory IfaceExpr      -- Only used for default methods, in fact
 
@@ -317,6 +317,7 @@ data IfaceUnfolding
                  Bool           -- OK to inline even if *un*-saturated
                  Bool           -- OK to inline even if context is boring
                  IfaceExpr
+                 (Either String Int)            -- Size of the expression
 
   | IfDFunUnfold [IfaceBndr] [IfaceExpr]
 
@@ -1130,7 +1131,9 @@ instance Outputable IfaceUnfolding where
                                 else Outputable.empty)
                               <+> text ("size " ++ show size)
                               <+> parens (ppr e)
-  ppr (IfInlineRule a uok bok e) = sep [text "InlineRule"
+  ppr (IfInlineRule a uok bok e size )
+                                 = sep [text "InlineRule"
+                                            <+> text ("size " ++ show size)
                                             <+> ppr (a,uok,bok),
                                         pprParendIfaceExpr e]
   ppr (IfDFunUnfold bs es) = hang (text "DFun:" <+> sep (map ppr bs) <> dot)
@@ -1351,7 +1354,7 @@ freeNamesItem _              = emptyNameSet
 freeNamesIfUnfold :: IfaceUnfolding -> NameSet
 freeNamesIfUnfold (IfCoreUnfold _ e _)   = freeNamesIfExpr e
 freeNamesIfUnfold (IfCompulsory e)       = freeNamesIfExpr e
-freeNamesIfUnfold (IfInlineRule _ _ _ e) = freeNamesIfExpr e
+freeNamesIfUnfold (IfInlineRule _ _ _ e _) = freeNamesIfExpr e
 freeNamesIfUnfold (IfDFunUnfold bs es)   = freeNamesIfBndrs bs &&& fnList freeNamesIfExpr es
 
 freeNamesIfExpr :: IfaceExpr -> NameSet
@@ -1810,12 +1813,13 @@ instance Binary IfaceUnfolding where
         put_ bh s
         put_ bh e
         put_ bh size
-    put_ bh (IfInlineRule a b c d) = do
+    put_ bh (IfInlineRule a b c d size) = do
         putByte bh 1
         put_ bh a
         put_ bh b
         put_ bh c
         put_ bh d
+        put_ bh size
     put_ bh (IfDFunUnfold as bs) = do
         putByte bh 2
         put_ bh as
@@ -1834,7 +1838,8 @@ instance Binary IfaceUnfolding where
                     b <- get bh
                     c <- get bh
                     d <- get bh
-                    return (IfInlineRule a b c d)
+                    size <- get bh
+                    return (IfInlineRule a b c d size)
             2 -> do as <- get bh
                     bs <- get bh
                     return (IfDFunUnfold as bs)

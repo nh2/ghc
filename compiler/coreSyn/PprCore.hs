@@ -442,9 +442,10 @@ showAttributes stuff
 
 instance Outputable UnfoldingGuidance where
     ppr UnfNever  = text "NEVER"
-    ppr (UnfWhen { ug_arity = arity, ug_unsat_ok = unsat_ok, ug_boring_ok = boring_ok })
+    ppr (UnfWhen { ug_arity = arity, ug_size_debug = size, ug_unsat_ok = unsat_ok, ug_boring_ok = boring_ok })
       = text "ALWAYS_IF" <>
         parens (text "arity="     <> int arity    <> comma <>
+                text "size="      <> ppr (show size) <> comma <>
                 text "unsat_ok="  <> ppr unsat_ok <> comma <>
                 text "boring_ok=" <> ppr boring_ok)
     ppr (UnfIfGoodArgs { ug_args = cs, ug_size = size, ug_res = discount })

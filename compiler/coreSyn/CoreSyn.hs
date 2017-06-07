@@ -1058,6 +1058,7 @@ data UnfoldingGuidance
                 --      (b) for INLINE functions
                 -- See Note [INLINE for small functions] in CoreUnfold
       ug_arity    :: Arity,             -- Number of value arguments expected
+      ug_size_debug     :: Either String Int,               -- The "size" of the unfolding
 
       ug_unsat_ok  :: Bool,     -- True <=> ok to inline even if unsaturated
       ug_boring_ok :: Bool      -- True <=> ok to inline even if the context is boring

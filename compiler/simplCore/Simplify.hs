@@ -2922,8 +2922,9 @@ simplUnfolding env top_lvl id unf
         | isStableSource src
         -> do { expr' <- simplExpr rule_env expr
               ; case guide of
-                  UnfWhen { ug_arity = arity, ug_unsat_ok = sat_ok }  -- Happens for INLINE things
+                  UnfWhen { ug_arity = arity, ug_size_debug = size, ug_unsat_ok = sat_ok }  -- Happens for INLINE things
                      -> let guide' = UnfWhen { ug_arity = arity, ug_unsat_ok = sat_ok
+                                             , ug_size_debug = size
                                              , ug_boring_ok = inlineBoringOk expr' }
                         -- Refresh the boring-ok flag, in case expr'
                         -- has got small. This happens, notably in the inlinings

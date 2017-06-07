@@ -1705,7 +1705,7 @@ toIfUnfolding lb (CoreUnfolding { uf_tmpl = rhs
         InlineStable
           -> case guidance of
                UnfWhen {ug_arity = arity, ug_unsat_ok = unsat_ok, ug_boring_ok =  boring_ok }
-                      -> IfInlineRule arity unsat_ok boring_ok if_rhs
+                      -> IfInlineRule arity unsat_ok boring_ok if_rhs size
                _other -> IfCoreUnfold True if_rhs size
         InlineCompulsory -> IfCompulsory if_rhs
         InlineRhs        -> IfCoreUnfold False if_rhs size
@@ -1716,8 +1716,9 @@ toIfUnfolding lb (CoreUnfolding { uf_tmpl = rhs
   where
     if_rhs = toIfaceExpr rhs
     size = case guidance of
-      UnfIfGoodArgs { ug_size = size } -> size
-      _ -> -1 -- TODO Maybe?
+      UnfIfGoodArgs { ug_size = size } -> Right size
+      UnfWhen { ug_size_debug = size } -> size
+      UnfNever -> Left "UnfNever"
 
 toIfUnfolding lb (DFunUnfolding { df_bndrs = bndrs, df_args = args })
   = Just (HsUnfold lb (IfDFunUnfold (map toIfaceBndr bndrs) (map toIfaceExpr args)))
