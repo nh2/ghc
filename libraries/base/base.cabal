@@ -333,6 +333,10 @@ Library
         WCsubst.h
         consUtils.h
 
+    -- Base uses libm functions. ld.bfd links libm implicitly when necessary.
+    -- Other linkers, like gold, don't, so we have to declare it explicitly.
+    extra-libraries: m
+
     -- OS Specific
     if os(windows)
         -- Windows requires some extra libraries for linking because the RTS
