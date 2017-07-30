@@ -4,6 +4,19 @@
  * hWaitForInput Runtime Support
  */
 
+/* FD_SETSIZE defaults to 64 on Windows, which makes even the most basic
+ * programs break that use select() on a socket FD.
+ * Thus we raise it here (before any #include of network-related headers)
+ * to 1024 so that at least those programs would work that would work on
+ * Linux if that used select() (luckily it uses poll() by now).
+ * See https://ghc.haskell.org/trac/ghc/ticket/13497#comment:23
+ * The real solution would be to remove all uses of select()
+ * on Windows, too, and use IO Completion Ports instead.
+ */
+#if defined(_WIN32)
+#define FD_SETSIZE 1024
+#endif
+
 /* select and supporting types is not Posix */
 /* #include "PosixSource.h" */
 #include "HsBase.h"
