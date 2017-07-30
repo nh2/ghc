@@ -37,6 +37,11 @@
 int
 fdReady(int fd, int write, int msecs, int isSock)
 {
+    if (msecs < 0) {
+        fprintf(stderr, "fdReady: msecs is negative: %d\n", msecs);
+        abort();
+    }
+
     // if we need to track the time then record the end time in case we are
     // interrupted.
     Time endTime = 0;
