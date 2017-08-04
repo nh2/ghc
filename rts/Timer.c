@@ -17,6 +17,7 @@
 
 #include "PosixSource.h"
 #include "Rts.h"
+#include "Task.h"
 
 #include "Timer.h"
 #include "Proftimer.h"
@@ -47,6 +48,49 @@ handle_tick(int unused STG_UNUSED)
       if (ticks_to_ctxt_switch <= 0) {
           ticks_to_ctxt_switch = RtsFlags.ConcFlags.ctxtSwitchTicks;
           contextSwitchAllCapabilities(); /* schedule a context switch */
+
+          // Special help for Windows to context-switch in the presence
+          // of blocking IO in the non-threaded runtime:
+          //
+          // Consider code like `timeout ... (hWaitForInput myFd ...)`,
+          // where `timeout` is implemented with some form of
+          // `forkIO (threadDelay ... >> throwTo)`, and `hWaitForInput` will
+          // call some form of `poll()`/`select()` syscall.
+          // Here we have some conceptually-blocking IO action `hWaitForInput`
+          // that is to be cancelled by a Haskell cooperative thread producing
+          // an exception eventually.
+          // In order for that to work, we need to enforce context-switching
+          // between the cooperative thread that implements `timeout` and the
+          // between the thread that does the blocking syscall.
+          // If we did not enforce this, we'd be stuck in the blocking syscall
+          // and the `timeout` Haskell code would never get a chance to run
+          // and produce its exception with `throwTo`.
+          //
+          // For the -threaded RTS, we don't need to enforce anything, because
+          // there the `timeout` code and the blocking syscall can run
+          // non-cooperatively in two different OS threads
+          // (as long as the blocking syscall is made via a `safe` or
+          // `interruptible` `ccall`, not an `unsafe` one, but wrapping blocking
+          // syscalls in `unsafe` FFI calls is wrong anyway).
+          //
+          // For the non-threaded RTS on Unix (nb: where we don't use `timerfd`
+          // because we use `timerfd` only in -threaded), that enforcing happens
+          // automatically as a side effect of the timer signal:
+          // The timer signal is a POSIX signal here, and POSIX signals interrupt
+          // blocking syscalls on Unix (they return -1 and set EINTR).
+          //
+          // But on Windows, not all blocking syscalls can be interrupted with
+          // POSIX signals.
+          // To interrupt those, we call `interruptWorkerTask()` here, to make
+          // context-switching work on the non-threaded RTS on Windows.
+          //
+          // See also:
+          //   - `interruptWorkerTask()` in `Task.h`
+          //   - `interruptOSThreadEvent` in `struct Task` in `Task.h`
+          //   - `rts_getInterruptOSThreadEvent()` in `Task.h`
+        #if defined(mingw32_HOST_OS) && !defined(THREADED_RTS)
+          interruptWorkerTask();
+        #endif
       }
   }
 

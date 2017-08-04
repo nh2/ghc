@@ -12,7 +12,6 @@
 #include "Rts.h"
 
 #include "RtsUtils.h"
-#include "Task.h"
 #include "Capability.h"
 #include "Stats.h"
 #include "Schedule.h"
@@ -196,6 +195,11 @@ freeTask (Task *task)
         stgFree(incall);
     }
 
+#if defined(mingw32_HOST_OS)
+    CloseHandle(task->interruptOSThreadEvent);
+    task->interruptOSThreadEvent = NULL;
+#endif
+
     stgFree(task);
 }
 
@@ -243,6 +247,15 @@ newTask (bool worker)
         }
     }
     RELEASE_LOCK(&all_tasks_mutex);
+
+#if defined(mingw32_HOST_OS)
+    task->interruptOSThreadEvent = CreateEvent(
+        NULL,               // default security attributes
+        FALSE,              // automatic-reset event
+        FALSE,              // initial state is nonsignaled
+        TEXT("interruptOSThreadEvent")  // object name
+    );
+#endif
 
     return task;
 }
@@ -508,12 +521,31 @@ interruptWorkerTask (Task *task)
 {
   ASSERT(osThreadId() != task->id);    // seppuku not allowed
   ASSERT(task->incall->suspended_tso); // use this only for FFI calls
+#if defined(mingw32_HOST_OS)
+  // On Windows, signal the `CreateEvent()` `HANDLE` for this task that can be
+  // used to wake up blocking functions like `WaitForMultipleObjects()`.
+  // See `interruptOSThreadEvent` in `struct Task` in `Task.h` for details.
+  BOOL success = SetEvent(task->interruptOSThreadEvent);
+  if (!success) {
+    sysErrorBelch("failed to signal interruptOSThreadEvent");
+    stg_exit(EXIT_FAILURE);
+  }
+#endif
   interruptOSThread(task->id);
   debugTrace(DEBUG_sched, "interrupted worker task %#" FMT_HexWord64,
              serialisableTaskId(task));
 }
 
 #endif /* THREADED_RTS */
+
+#if defined(mingw32_HOST_OS)
+HANDLE
+rts_getInterruptOSThreadEvent ()
+{
+    Task* task = getTask();
+    return task->interruptOSThreadEvent;
+}
+#endif
 
 void rts_setInCallCapability (
     int preferred_capability,

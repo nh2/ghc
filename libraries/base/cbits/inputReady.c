@@ -93,22 +93,22 @@ compute_windows_select_timeout(bool infinite, Time remaining,
 }
 
 /*
- * Returns a timeout suitable to be passed into WaitForSingleObject() on
- * Windows.
+ * Returns a timeout suitable to be passed into WaitForSingleObject(),
+ * WaitForMultipleObjects(), etc, on Windows.
  *
  * If `remaining` contains a fractional milliseconds part that cannot be passed
- * to WaitForSingleObject(), this function will return the next larger value
- * that can, so that the timeout passed to WaitForSingleObject() would
+ * to such wait function, this function will return the next larger value
+ * that can, so that the timeout passed to such wait function would
  * always be `>= remaining`.
  *
  * If `infinite`, `remaining` is ignored.
  */
 static inline
 DWORD
-compute_WaitForSingleObject_timeout(bool infinite, Time remaining)
+compute_WaitForObject_timeout(bool infinite, Time remaining)
 {
-    // WaitForSingleObject() has the fascinating delicacy behaviour
-    // that it waits indefinitely if the `DWORD dwMilliseconds`
+    // The WaitFor*Object() functions have the fascinating delicacy behaviour
+    // that they waits indefinitely if the `DWORD dwMilliseconds`
     // is set to 0xFFFFFFFF (the maximum DWORD value), which is
     // 4294967295 seconds == ~49.71 days
     // (the Windows API calls this constant INFINITE...).
@@ -116,7 +116,7 @@ compute_WaitForSingleObject_timeout(bool infinite, Time remaining)
     //
     // We ensure that if accidentally `remaining == 4294967295`, it does
     // NOT wait forever, by never passing that value to
-    // WaitForSingleObject() (so, never returning it from this function),
+    // WaitFor*Object() (so, never returning it from this function),
     // unless `infinite`.
 
     if (infinite) return INFINITE;
@@ -131,6 +131,29 @@ compute_WaitForSingleObject_timeout(bool infinite, Time remaining)
 
     return remaining_ms;
 }
+
+/*
+ * Special case of `WaitForMultipleObjects()` that waits for the given HANDLE
+ * or the GHC RTS's per-thread `rts_getInterruptOSThreadEvent()`.
+ *
+ * Returns the same values as `WaitForMultipleObjects`;
+ * the `WAIT_OBJECT_0 + 0` index is the one for the given HANDLE, and
+ * the `WAIT_OBJECT_0 + 1` index is the one for the interrupt event.
+ */
+static inline
+DWORD
+WaitForObjectOrThreadInterrupt(HANDLE hHandle, DWORD dwMilliseconds)
+{
+    enum nCount { nCount = 2 }; // to use it as a constant
+    HANDLE hWaits[nCount];
+    hWaits[0] = hHandle;
+    hWaits[1] = rts_getInterruptOSThreadEvent();
+    return WaitForMultipleObjects(
+        nCount,
+        hWaits,
+        false, // wait for any of the HANDLEs to signal
+        dwMilliseconds);
+}
 #endif
 
 /*
@@ -143,12 +166,17 @@ compute_WaitForSingleObject_timeout(bool infinite, Time remaining)
  * see `man 2 poll` and `man 2 select`, and
  * https://ghc.haskell.org/trac/ghc/ticket/13497#comment:26).
  *
- * This function blocks until either `msecs` have passed, or input is
- * available.
+ * This function blocks until either:
+ *   -  `msecs` have passed, or
+ *   -  input is available, or
+ *   -  it has been interrupted, e.g. by the timer signal,
+ *      or by an exception if it is called via `InterruptibleFFI`
  *
- * Returns:
- *   1 => Input ready, 0 => not ready, -1 => error
- * On error, sets `errno`.
+ * Return value:
+ *   1 => Input ready
+ *   0 => not ready
+ *  -1 => error, or interrupted by a signal (then callers should check
+ *        errno == EINTR and retry depending on how much time is left)
  */
 int
 fdReady(int fd, bool write, int64_t msecs, bool isSock)
@@ -223,35 +251,21 @@ fdReady(int fd, bool write, int64_t msecs, bool isSock)
     fds[0].events = write ? POLLOUT : POLLIN;
     fds[0].revents = 0;
 
-    // The code below tries to make as few syscalls as possible;
-    // in particular, it eschews getProcessElapsedTime() calls
-    // when `infinite` or `msecs == 0`.
-
     // We need to wait in a loop because poll() accepts `int` but `msecs` is
-    // `int64_t`, and because signals can interrupt it.
+    // `int64_t`.
+    // We only retry within C when poll() timed out because of this type
+    // difference; in all other cases we return to Haskell.
 
     while (true) {
         int res = poll(fds, 1, compute_poll_timeout(infinite, remaining));
 
-        if (res < 0 && errno != EINTR)
-            return (-1); // real error; errno is preserved
-
-        if (res > 0)
-            return 1; // FD has new data
-
-        if (res == 0 && !infinite && remaining <= MSToTime(INT_MAX))
-            return 0; // FD has no new data and [we waited the full msecs]
-
-        // Non-exit cases
-        CHECK( ( res < 0 && errno == EINTR ) || // EINTR happened
-               // need to wait more
-               ( res == 0 && (infinite ||
-                              remaining > MSToTime(INT_MAX)) ) );
-
-        if (!infinite) {
+        if (res == 0 && !infinite && remaining > MSToTime(INT_MAX)) {
             Time now = getProcessElapsedTime();
             remaining = endTime - now;
+            continue;
         }
+
+        return (res > 0) ? 1 : res;
     }
 
 #else
@@ -279,41 +293,44 @@ fdReady(int fd, bool write, int64_t msecs, bool isSock)
 
         // We need to wait in a loop because the `timeval` `tv_*` members
         // passed into select() accept are `long` (which is 32 bits on 32-bit
-        // and 64-bit Windows), but `msecs` is `int64_t`, and because signals
-        // can interrupt it.
+        // and 64-bit Windows), but `msecs` is `int64_t`.
         //   https://msdn.microsoft.com/en-us/library/windows/desktop/ms740560(v=vs.85).aspx
         //   https://stackoverflow.com/questions/384502/what-is-the-bit-size-of-long-on-64-bit-windows#384672
+        // We only retry within C when poll() timed out because of this type
+        // difference; in all other cases we return to Haskell.
 
         while (true) {
             int res = select(maxfd, &rfd, &wfd, NULL,
                              compute_windows_select_timeout(infinite, remaining,
                                                             &remaining_tv));
 
-            if (res < 0 && errno != EINTR)
-                return (-1); // real error; errno is preserved
-
-            if (res > 0)
-                return 1; // FD has new data
-
-            if (res == 0 && !infinite && remaining <= MSToTime(INT_MAX))
-                return 0; // FD has no new data and [we waited the full msecs]
-
-            // Non-exit cases
-            CHECK( ( res < 0 && errno == EINTR ) || // EINTR happened
-                   // need to wait more
-                   ( res == 0 && (infinite ||
-                                  remaining > MSToTime(INT_MAX)) ) );
-
-            if (!infinite) {
+            if (res == 0 && !infinite && remaining > MSToTime(INT_MAX)) {
                 Time now = getProcessElapsedTime();
                 remaining = endTime - now;
+                continue;
             }
+
+            return (res > 0) ? 1 : res;
         }
 
     } else {
         DWORD rc;
         HANDLE hFile = (HANDLE)_get_osfhandle(fd);
         DWORD avail = 0;
+
+        // Note that in older versions of this code, we tried to
+        // have a `WaitForSingleObject()` and observe
+        // `ERROR_OPERATION_ABORTED` when a `CancelSynchronousIo()`
+        // came in to interrupt it. This did not work.
+        // See:
+        //   https://ghc.haskell.org/trac/ghc/ticket/8684#comment:25
+        //   https://stackoverflow.com/questions/47336755/how-to-cancelsynchronousio-on-waitforsingleobject-waiting-on-stdin
+        //
+        // Instead, we wait for any of 2 objects (whichever returns
+        // earlier): the actual file HANDLE and the
+        // `rts_getInterruptOSThreadEvent()` event HANDLE for the
+        // current thread, which gets signalled when GHC wants
+        // to interrupt the thread.
 
         switch (GetFileType(hFile)) {
 
@@ -323,30 +340,57 @@ fdReady(int fd, bool write, int64_t msecs, bool isSock)
                     DWORD count;
 
                     // nightmare.  A Console Handle will appear to be ready
-                    // (WaitForSingleObject() returned WAIT_OBJECT_0) when
+                    // (WaitForMultipleObjects() returned a WAIT_OBJECT_0 index) when
                     // it has events in its input buffer, but these events might
                     // not be keyboard events, so when we read from the Handle the
                     // read() will block.  So here we try to discard non-keyboard
                     // events from a console handle's input buffer and then try
-                    // the WaitForSingleObject() again.
+                    // the WaitForMultipleObjects() again.
+
+                    // As a result, we have to loop and keep track of `remaining`
+                    // time, even though for non-FILE_TYPE_CHAR calls to `fdReady`
+                    // the calling Haskell code also has a loop.
+                    // This is OK because if in the below code a
+                    // the operation was aborted by an event signal to
+                    // `rts_getInterruptOSThreadEvent()`, -1 is returned straight
+                    // away.
 
                     while (1) // keep trying until we find a real key event
                     {
-                        rc = WaitForSingleObject(
+                        rc = WaitForObjectOrThreadInterrupt(
                             hFile,
-                            compute_WaitForSingleObject_timeout(infinite, remaining));
+                            compute_WaitForObject_timeout(infinite, remaining)
+                            );
                         switch (rc) {
+                            case WAIT_FAILED:
+                                maperrno();
+                                return -1;
                             case WAIT_TIMEOUT:
                                 // We need to use < here because if remaining
                                 // was INFINITE, we'll have waited for
                                 // `INFINITE - 1` as per
-                                // compute_WaitForSingleObject_timeout(),
+                                // compute_WaitForObject_timeout(),
                                 // so that's 1 ms too little. Wait again then.
                                 if (!infinite && remaining < MSToTime(INFINITE))
                                     return 0; // real complete or [we waited the full msecs]
                                 goto waitAgain;
-                            case WAIT_OBJECT_0: break;
-                            default: /* WAIT_FAILED */ maperrno(); return -1;
+                            default:
+                                switch (rc - WAIT_OBJECT_0) {
+                                    case 0:
+                                        // hFile signaled.
+                                        // Continue with the non-key events discarding below.
+                                        break;
+                                    case 1:
+                                        // interruptOSThreadEvent signaled.
+                                        // Map this interruption to EINTR so
+                                        // that the calling Haskell code
+                                        // retries.
+                                        errno = EINTR;
+                                        return -1;
+                                    default:
+                                        barf("fdReady: Unexpected WaitForObjectOrThreadInterrupt() return code in FILE_TYPE_CHAR case: %lu", rc);
+                                }
+                                break;
                         }
 
                         while (1) // discard non-key events
@@ -409,40 +453,31 @@ fdReady(int fd, bool write, int64_t msecs, bool isSock)
                 // PeekNamedPipe():
                 //
                 // PeekNamedPipe() does not block, so if it returns that
-                // there is no new data, we have to sleep and try again.
-
-                // Because PeekNamedPipe() doesn't block, we have to track
-                // manually whether we've called it one more time after `endTime`
-                // to fulfill Note [Guaranteed syscall time spent].
-                bool endTimeReached = false;
-                while (avail == 0) {
-                    BOOL success = PeekNamedPipe( hFile, NULL, 0, NULL, &avail, NULL );
-                    if (success) {
-                        if (avail != 0) {
-                            return 1;
-                        } else { // no new data
-                            if (infinite) {
-                                Sleep(1); // 1 millisecond (smallest possible time on Windows)
-                                continue;
-                            } else if (msecs == 0) {
-                                return 0;
-                            } else {
-                                if (endTimeReached) return 0; // [we waited the full msecs]
-                                Time now = getProcessElapsedTime();
-                                if (now >= endTime) endTimeReached = true;
-                                Sleep(1); // 1 millisecond (smallest possible time on Windows)
-                                continue;
-                            }
+                // there is no new data, and we were expected to block
+                // (i.e. `infinite || msecs > 0`), then we have to sleep,
+                // because the calling Haskell code will retry and thus create
+                // a busy loop if we didn't sleep.
+                BOOL success = PeekNamedPipe( hFile, NULL, 0, NULL, &avail, NULL );
+                if (success) {
+                    if (avail != 0) {
+                        return 1;
+                    } else { // no new data
+                        if (infinite || remaining > 0) {
+                            Sleep(1); // 1 millisecond (smallest possible time on Windows)
+                            // Note one can also Sleep(0) on Windows to yield,
+                            // but that will still busy loop if the machine
+                            // has nothing else to do.
                         }
-                    } else {
-                        rc = GetLastError();
-                        if (rc == ERROR_BROKEN_PIPE) {
-                            return 1; // this is probably what we want
-                        }
-                        if (rc != ERROR_INVALID_HANDLE && rc != ERROR_INVALID_FUNCTION) {
-                            maperrno();
-                            return -1;
-                        }
+                        return 0;
+                    }
+                } else {
+                    rc = GetLastError();
+                    if (rc == ERROR_BROKEN_PIPE) {
+                        return 1; // this is probably what we want
+                    }
+                    if (rc != ERROR_INVALID_HANDLE && rc != ERROR_INVALID_FUNCTION) {
+                        maperrno();
+                        return -1;
                     }
                 }
             }
@@ -450,28 +485,43 @@ fdReady(int fd, bool write, int64_t msecs, bool isSock)
 
             default:
                 while (true) {
-                    rc = WaitForSingleObject(
+                    rc = WaitForObjectOrThreadInterrupt(
                         hFile,
-                        compute_WaitForSingleObject_timeout(infinite, remaining));
+                        compute_WaitForObject_timeout(infinite, remaining)
+                        );
 
                     switch (rc) {
+                        case WAIT_FAILED:
+                            maperrno();
+                            return -1;
                         case WAIT_TIMEOUT:
                             // We need to use < here because if remaining
                             // was INFINITE, we'll have waited for
                             // `INFINITE - 1` as per
-                            // compute_WaitForSingleObject_timeout(),
+                            // compute_WaitForObject_timeout(),
                             // so that's 1 ms too little. Wait again then.
                             if (!infinite && remaining < MSToTime(INFINITE))
                                 return 0; // real complete or [we waited the full msecs]
+                            Time now = getProcessElapsedTime();
+                            remaining = endTime - now;
                             break;
-                        case WAIT_OBJECT_0: return 1;
-                        default: /* WAIT_FAILED */ maperrno(); return -1;
-                    }
-
-                    // EINTR or a >(INFINITE - 1) timeout completed
-                    if (!infinite) {
-                        Time now = getProcessElapsedTime();
-                        remaining = endTime - now;
+                        default:
+                            switch (rc - WAIT_OBJECT_0) {
+                                case 0:
+                                    // hFile signaled.
+                                    // Continue with the non-key events discarding below.
+                                    return 1;
+                                case 1:
+                                    // interruptOSThreadEvent signaled.
+                                    // Map this interruption to EINTR so
+                                    // that the calling Haskell code
+                                    // retries.
+                                    errno = EINTR;
+                                    return -1;
+                                default:
+                                    barf("fdReady: Unexpected WaitForObjectOrThreadInterrupt() return code: %lu", rc);
+                            }
+                            break;
                     }
                 }
         }

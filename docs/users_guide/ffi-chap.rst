@@ -144,7 +144,7 @@ When the ``InterruptibleFFI`` extension is enabled, a foreign call can
 be annotated with ``interruptible`` instead of ``safe`` or ``unsafe``: ::
 
     foreign import ccall interruptible
-       "sleep" sleepBlock :: CUint -> IO CUint
+       "sleep" sleepBlock :: CUInt -> IO CUInt
 
 ``interruptible`` behaves exactly as ``safe``, except that when a
 ``throwTo`` is directed at a thread in an interruptible foreign call, an
@@ -160,8 +160,23 @@ Unix systems
 
 Windows systems
     [Vista and later only] The RTS calls the Win32 function
-    ``CancelSynchronousIo``, which will cause a blocking I/O operation
+    ``CancelSynchronousIo()``, which will cause a blocking I/O operation
     to return with the error ``ERROR_OPERATION_ABORTED``.
+    Functions like ``WaitForSingleObject()`` and ``WaitForMultipleObjects()``
+    are not considered I/O operations, and thus cannot be aborted with
+    ``CancelSynchronousIo()``.
+    To make these functions cancellable, the GHC RTS provides a
+    function ``HANDLE rts_interruptOSThreadEvent()``, which returns
+    an Event object (as produced by Window's ``CreateEvent()``)
+    that gets signalled when GHC wants to cancel an ``interruptible``
+    ccall.
+    Thus, if your foreign call uses ``WaitForMultipleObjects()``, it should
+    include the ``HANDLE`` returned by ``rts_interruptOSThreadEvent()``
+    in its list of objects to wait for, and treat that object being
+    signalled the same way as it would ``ERROR_OPERATION_ABORTED``
+    (that usually is, setting ``errno = EINTR`` and returning to Haskell);
+    if it uses ``WaitForSingleObject()``, it should use
+    ``WaitForMultipleObjects()`` instead.
 
 If the system call is successfully interrupted, it will return to
 Haskell whereupon the exception can be raised. Be especially careful
