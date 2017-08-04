@@ -37,20 +37,21 @@
  *
  * This function blocks until either `msecs` have passed, or input is
  * available.
+ *
+ * Return value:
+ *   1 => Input ready
+ *   0 => not ready
+ *  -1 => error, or interrupted by a signal (then callers should check
+ *        errno == EINT and retry depending on how much time is left)
  */
 int
 fdReady(int fd, int write, int msecs, int isSock)
 {
+    puts("fdReady called\n");
+    fprintf(stderr, "fdReady called with msecs = %d\n", msecs);
     if (msecs < 0) {
         fprintf(stderr, "fdReady: msecs is negative: %d\n", msecs);
         abort();
-    }
-
-    // if we need to track the time then record the end time in case we are
-    // interrupted.
-    Time endTime = 0;
-    if (msecs > 0) {
-        endTime = getProcessElapsedTime() + MSToTime(msecs);
     }
 
 #if !defined(_WIN32)
@@ -60,30 +61,16 @@ fdReady(int fd, int write, int msecs, int isSock)
     fds[0].events = write ? POLLOUT : POLLIN;
     fds[0].revents = 0;
 
-    Time remaining = MSToTime(msecs);
+    // res is the number of FDs with events, or -1 on failure
+    int res = poll(fds, 1, msecs);
 
-    int res;
-    while ((res = poll(fds, 1, TimeToMS(remaining))) < 0) {
-        if (errno == EINTR) {
-            if (msecs > 0) {
-                Time now = getProcessElapsedTime();
-                if (now >= endTime) return 0;
-                remaining = endTime - now;
-            }
-        } else {
-            return (-1);
-        }
-    }
-
-    // res is the number of FDs with events
-    return (res > 0);
+    return res > 0 ? (res > 0) : res;
 
 #else
 
     if (isSock) {
-        int maxfd, ready;
+        int maxfd;
         fd_set rfd, wfd;
-        struct timeval remaining_tv;
 
         if ((fd >= (int)FD_SETSIZE) || (fd < 0)) {
             fprintf(stderr, "fdReady: fd is too big: %d but FD_SETSIZE is %d\n", fd, (int)FD_SETSIZE);
@@ -106,22 +93,11 @@ fdReady(int fd, int write, int msecs, int isSock)
         remaining_tv.tv_sec  = TimeToMS(remaining) / 1000;
         remaining_tv.tv_usec = TimeToUS(remaining) % 1000000;
 
-        while ((ready = select(maxfd, &rfd, &wfd, NULL, &remaining_tv)) < 0 ) {
-            if (errno == EINTR) {
-                if (msecs > 0) {
-                    Time now = getProcessElapsedTime();
-                    if (now >= endTime) return 0;
-                    remaining = endTime - now;
-                    remaining_tv.tv_sec  = TimeToMS(remaining) / 1000;
-                    remaining_tv.tv_usec = TimeToUS(remaining) % 1000000;
-                }
-            } else {
-                return (-1);
-            }
-        }
+        // res is the number of FDs with events, or -1 on failure
+        int res = select(maxfd, &rfd, &wfd, NULL, &remaining_tv);
 
-        /* 1 => Input ready, 0 => not ready, -1 => error */
-        return (ready);
+        return res > 0 ? (res > 0) : res;
+
     } else {
         DWORD rc;
         HANDLE hFile = (HANDLE)_get_osfhandle(fd);
@@ -143,6 +119,13 @@ fdReady(int fd, int write, int msecs, int isSock)
                     // read() will block.  So here we try to discard non-keyboard
                     // events from a console handle's input buffer and then try
                     // the WaitForSingleObject() again.
+
+                    // As a result, we have to loop and keep track of `remaining`
+                    // time, even though for non-FILE_TYPE_CHAR calls to `fdReady`
+                    // the calling Haskell code does this loop.
+                    // This is OK because if in the below code a
+                    // ERROR_OPERATION_ABORTED comes in, -1 is returned straight
+                    // away.
 
                     while (1) // keep trying until we find a real key event
                     {
@@ -211,31 +194,31 @@ fdReady(int fd, int write, int msecs, int isSock)
                 // PeekNamedPipe():
                 //
                 // PeekNamedPipe() does not block, so if it returns that
-                // there is no new data, we have to sleep and try again.
-                while (avail == 0) {
-                    rc = PeekNamedPipe( hFile, NULL, 0, NULL, &avail, NULL );
-                    if (rc != 0) {
-                        if (avail != 0) {
-                            return 1;
-                        } else { // no new data
-                            if (msecs > 0) {
-                                Time now = getProcessElapsedTime();
-                                if (now >= endTime) return 0;
-                                Sleep(1); // 1 millisecond (smallest possible time on Windows)
-                                continue;
-                            } else {
-                                return 0;
-                            }
+                // there is no new data, and we were expected to
+                // block (msecs > 0), then we have to sleep, because the
+                // calling Haskell code will retry and thus create a busy loop
+                // if we didn't sleep.
+                rc = PeekNamedPipe( hFile, NULL, 0, NULL, &avail, NULL );
+                if (rc != 0) {
+                    if (avail != 0) {
+                        return 1;
+                    } else { // no new data
+                        if (msecs > 0) {
+                            Sleep(1); // 1 millisecond (smallest possible time on Windows)
+                            // Note one can also Sleep(0) on Windows to yield,
+                            // but that will still busy loop if the machine
+                            // has nothing else to do.
                         }
-                    } else {
-                        rc = GetLastError();
-                        if (rc == ERROR_BROKEN_PIPE) {
-                            return 1; // this is probably what we want
-                        }
-                        if (rc != ERROR_INVALID_HANDLE && rc != ERROR_INVALID_FUNCTION) {
-                            maperrno();
-                            return -1;
-                        }
+                        return 0;
+                    }
+                } else {
+                    rc = GetLastError();
+                    if (rc == ERROR_BROKEN_PIPE) {
+                        return 1; // this is probably what we want
+                    }
+                    if (rc != ERROR_INVALID_HANDLE && rc != ERROR_INVALID_FUNCTION) {
+                        maperrno();
+                        return -1;
                     }
                 }
                 /* PeekNamedPipe didn't work - fall through to the general case */
@@ -243,7 +226,6 @@ fdReady(int fd, int write, int msecs, int isSock)
             default:
                 rc = WaitForSingleObject( hFile, msecs );
 
-                /* 1 => Input ready, 0 => not ready, -1 => error */
                 switch (rc) {
                     case WAIT_TIMEOUT: return 0;
                     case WAIT_OBJECT_0: return 1;

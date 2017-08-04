@@ -1,6 +1,6 @@
 /* ----------------------------------------------------------------------------
    (c) The University of Glasgow 2006
-   
+
    Useful Win32 bits
    ------------------------------------------------------------------------- */
 
@@ -64,6 +64,7 @@ static struct errentry errtable[] = {
            /* Windows returns this when the read end of a pipe is
             * closed (or closing) and we write to it. */
         {  ERROR_NO_DATA,                EPIPE     },  /* 232 */
+        {  ERROR_OPERATION_ABORTED,      EINTR     },  /* 995 */
         {  ERROR_NOT_ENOUGH_QUOTA,       ENOMEM    }  /* 1816 */
 };
 

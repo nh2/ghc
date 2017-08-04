@@ -4,6 +4,7 @@
            , UnboxedTuples
            , ScopedTypeVariables
            , RankNTypes
+           , InterruptibleFFI
   #-}
 {-# OPTIONS_GHC -Wno-deprecations #-}
 -- kludge for the Control.Concurrent.QSem, Control.Concurrent.QSemN
@@ -406,6 +407,8 @@ threadWaitRead fd
   -- fdReady does the right thing, but we have to call it in a
   -- separate thread, otherwise threadWaitRead won't be interruptible,
   -- and this only works with -threaded.
+  -- TODO The above is probably no longer true now that `fdReady()`
+  --      is interruptible, so we can probably delete `withThread` everywhere.
   | threaded  = withThread (waitFd fd 0)
   | otherwise = case fd of
                   0 -> do _ <- hWaitForInput stdin (-1)
@@ -495,13 +498,13 @@ withThread io = do
 
 waitFd :: Fd -> CInt -> IO ()
 waitFd fd write = do
-   throwErrnoIfMinus1_ "fdReady" $
+   throwErrnoIfMinus1Retry_ "fdReady" $
         fdReady (fromIntegral fd) write iNFINITE 0
 
 iNFINITE :: CInt
 iNFINITE = 0xFFFFFFFF -- urgh
 
-foreign import ccall safe "fdReady"
+foreign import interruptible safe "fdReady"
   fdReady :: CInt -> CInt -> CInt -> CInt -> IO CInt
 #endif
 
