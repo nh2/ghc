@@ -18,6 +18,9 @@ extern "C" {
 #include "HsFFI.h"
 #include "rts/Time.h"
 #include "rts/EventLogWriter.h"
+#if defined(mingw32_HOST_OS)
+#include <windows.h>
+#endif
 
 /*
  * Running the scheduler
@@ -281,6 +284,19 @@ void rts_unlock (Capability *token);
 // WARNING: There is *no* guarantee this returns anything sensible (eg NULL)
 // when there is no current capability.
 Capability *rts_unsafeGetMyCapability (void);
+
+#if defined(mingw32_HOST_OS)
+// Gets the `interruptOSThreadEvent` of the currently running `Task`.
+// Windows syscalls, especially in `interruptible` FFI calls, should listen on
+// this event to notice when they shall be interrupted.
+// This listening is typically done with `WaitForMultipleObjects()`,
+// where one of the objects passed is the HANDLE returned by this function.
+// The returned HANDLE is always a valid event (produced by `CreateEvent()`),
+// as long as this function is called between `hs_init()` and `hs_exit()`,
+// and as long as the function is called between `newTask()` and `freeTask()`
+// of the `Task`.
+HANDLE rts_getInterruptOSThreadEvent (void);
+#endif
 
 /* ----------------------------------------------------------------------------
    Which cpu should the OS thread and Haskell thread run on?

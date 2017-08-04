@@ -371,6 +371,18 @@ interruptOSThread (OSThreadId id)
     pthread_kill(id, SIGPIPE);
 }
 
+void
+interruptOSThreadTimer (OSThreadId id)
+{
+#if defined(USE_TIMER_CREATE)
+    // See TimerCreate.c
+    pthread_kill(id, SIGVTALRM);
+#else
+    // See Setitimer.c
+    pthread_kill(id, SIGALRM);
+#endif
+}
+
 KernelThreadId kernelThreadId (void)
 {
 #if defined(linux_HOST_OS)

@@ -172,6 +172,16 @@ extern int  createOSThread        ( OSThreadId* tid, char *name,
                                     OSThreadProc *startProc, void *param);
 extern bool osThreadIsAlive       ( OSThreadId id );
 extern void interruptOSThread     (OSThreadId id);
+// Like `interruptOSThread()`, but sends the signal that's used
+// for the timer signal (SIG(VT)ALRM instead of SIGPIPE).
+// This is a "softer" interrupt, because as per convention,
+// programs that don't want to receive the timer signal for
+// a while (e.g. because they make a call to foreign library
+// that can't handle it) just block SIG(VT)ALRM.
+// `interruptOSThread()` with its SIGPIPE is used for "harder"
+// interrupts, such as for `throwTo`s cancelling
+// `ccall interruptible`s.
+extern void interruptOSThreadTimer (OSThreadId id);
 
 //
 // Condition Variables

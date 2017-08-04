@@ -17,6 +17,7 @@
 
 #include "PosixSource.h"
 #include "Rts.h"
+#include "Task.h"
 
 #include "Timer.h"
 #include "Proftimer.h"
@@ -24,6 +25,7 @@
 #include "Ticker.h"
 #include "Capability.h"
 #include "RtsSignals.h"
+#include "Itimer.h"
 
 /* ticks left before next pre-emptive context switch */
 static int ticks_to_ctxt_switch = 0;
@@ -47,6 +49,82 @@ handle_tick(int unused STG_UNUSED)
       if (ticks_to_ctxt_switch <= 0) {
           ticks_to_ctxt_switch = RtsFlags.ConcFlags.ctxtSwitchTicks;
           contextSwitchAllCapabilities(); /* schedule a context switch */
+
+          // Special help for context-switching in the presence
+          // of blocking IO in the non-threaded runtime:
+          //
+          // Consider code like `timeout ... (hWaitForInput myFd ...)`,
+          // where `timeout` is implemented with some form of
+          // `forkIO (threadDelay ... >> throwTo)`, and `hWaitForInput` will
+          // call some form of `poll()`/`select()` syscall.
+          // Here we have some conceptually-blocking IO action `hWaitForInput`
+          // that is to be cancelled by a Haskell cooperative thread producing
+          // an exception eventually.
+          // In order for that to work, we need to enforce context-switching
+          // between the cooperative thread that implements `timeout` and the
+          // between the thread that does the blocking syscall.
+          // If we did not enforce this, we'd be stuck in the blocking syscall
+          // and the `timeout` Haskell code would never get a chance to run
+          // and produce its exception with `throwTo`.
+          //
+          // For the -threaded RTS, we don't need to enforce anything, because
+          // there the `timeout` code and the blocking syscall can run
+          // non-cooperatively in two different OS threads
+          // (as long as the blocking syscall is made via a `safe` or
+          // `interruptible` `ccall`, not an `unsafe` one, but wrapping blocking
+          // syscalls in `unsafe` FFI calls is wrong anyway).
+          //
+          // For the non-threaded RTS, we enforce it by calling
+          // `interruptOSThreadTimer()` to interrupt the (single) thread on which
+          // Haskell, and thus blocking FFI calls, are running.
+          //
+          // Note we don't have to do this on those Unix platforms where
+          // we don't use a pthread to implement the timer signal
+          // (yes, on some platforms we use pthreads for the timer signal
+          // even in the non-threaded RTS, see `Itimer.h`):
+          // On such platforms, that enforcing happens
+          // automatically as a side effect of the timer signal:
+          // The timer signal is a POSIX signal to the whole process (and thus
+          // single thread) here, and POSIX signals interrupt
+          // blocking syscalls on Unix (they return -1 and set EINTR).
+          //
+          // Extra work has to be done on Windows, where not all blocking
+          // syscalls can be interrupted with a POSIX signal; specifically
+          // POSIX signals don't interrupt `WaitForMultipleObjects()`.
+          // To interrupt such, signal the `interruptOSThreadEvent`, to make
+          // context-switching work on the non-threaded RTS on Windows.
+          // Note that for this to have an effect, the `interruptOSThreadEvent`
+          // must have been one of the objects passed to
+          // `WaitForMultipleObjects()`; that is, the C library must be designed
+          // to specifically handle the Haskell RTS waking it up. If that is not
+          // the case, all bets are off and the call will result in Haskell RTS
+          // context switching not happening during the call's duration.
+          //
+          // See also:
+          //   - How the choice of timer signal implementation is made
+          //     in `Itimer.h`
+          //   - `interruptOSThreadTimer()` in `win32/OSThreads.c`
+          //   - `interruptOSThreadEvent` in `struct Task` in `Task.h`
+          //   - `rts_getInterruptOSThreadEvent()` in `Task.h`
+#if !defined(THREADED_RTS)
+
+#if defined(mingw32_HOST_OS)
+          SetEvent(rts_getInterruptOSThreadEvent());
+#endif /* defined(mingw32_HOST_OS) */
+
+#if USE_PTHREAD_FOR_ITIMER || defined(mingw32_HOST_OS)
+          // Because
+          //   * on platforms where we `USE_PTHREAD_FOR_ITIMER`, or
+          //   * on Windows the timer signal is set up with
+          //     `CreateTimerQueueTimer(... , WT_EXECUTEINTIMERTHREAD, ...)`,
+          // `handle_tick()` runs in its own thread.
+          // We want to interrupt the (single/only) thread that runs Haskell
+          // and may be stuck in FFI calls; that is `mainThreadId`.
+          ASSERT(mainThreadId != NULL);
+          interruptOSThreadTimer(*mainThreadId);
+#endif /* USE_PTHREAD_FOR_ITIMER || defined(mingw32_HOST_OS) */
+
+#endif /* !defined(THREADED_RTS) */
       }
   }
 

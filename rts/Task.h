@@ -12,6 +12,7 @@
 #pragma once
 
 #include "GetTime.h"
+#include "Itimer.h"
 
 #include "BeginPrivate.h"
 
@@ -166,6 +167,18 @@ typedef struct Task_ {
     struct Task_ *all_next;
     struct Task_ *all_prev;
 
+#if defined(mingw32_HOST_OS)
+    // On Windows, we need an Event to signal the OS thread that is running
+    // the task when we want to cancel blocking system calls via
+    // `interruptOSThread()`.
+    // See `fdReady()` for when those signals are picked up.
+    // See also:
+    //   https://msdn.microsoft.com/en-us/library/windows/desktop/ms686915(v=vs.85).aspx
+    // On Unix, we don't need this; there we instead send a signal to the
+    // thread blocked in a syscall to interrupt it with EINTR.
+    HANDLE interruptOSThreadEvent;
+#endif
+
 } Task;
 
 INLINE_HEADER bool
@@ -184,6 +197,13 @@ isWorker (Task *task)
 {
     return (task->worker && task->incall->prev_stack == NULL);
 }
+
+// The OS Thread ID of the main thread of the process.
+// In the non-threaded RTS, this is the thread ID on which
+// any Haskell code is running.
+#if USE_PTHREAD_FOR_ITIMER || defined(mingw32_HOST_OS)
+extern OSThreadId* mainThreadId;
+#endif
 
 // Linked list of all tasks.
 //
