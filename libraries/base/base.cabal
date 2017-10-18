@@ -202,6 +202,7 @@ Library
         GHC.Arr
         GHC.Base
         GHC.Char
+        GHC.Clock
         GHC.Conc
         GHC.Conc.IO
         GHC.Conc.Signal
@@ -355,7 +356,6 @@ Library
         other-modules:
             GHC.Event.Arr
             GHC.Event.Array
-            GHC.Event.Clock
             GHC.Event.Control
             GHC.Event.EPoll
             GHC.Event.IntTable
