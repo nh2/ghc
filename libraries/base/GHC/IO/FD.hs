@@ -480,7 +480,8 @@ ready fd write msecs = do
 #endif
 
 foreign import ccall interruptible "fdReady"
-  fdReady :: CInt -> CBool -> Int64 -> CBool -> IO CInt
+  -- The `Word8` should be `CBool`, but GHC 8.0 doesn't have that yet.
+  fdReady :: CInt -> Word8 -> Int64 -> Word8 -> IO CInt
 
 -- ---------------------------------------------------------------------------
 -- Terminal-related stuff
@@ -658,7 +659,8 @@ isNonBlocking fd = fdIsNonBlocking fd /= 0
 -- so that it cannot block the runtime.
 -- If you want to use a timeout, use `fdReady` instead.
 foreign import ccall unsafe "fdReady"
-  unsafe_fdReady :: CInt -> CBool -> Int64 -> CBool -> IO CInt
+  -- The `Word8` should be `CBool`, but GHC 8.0 doesn't have that yet.
+  unsafe_fdReady :: CInt -> Word8 -> Int64 -> Word8 -> IO CInt
 
 #else /* mingw32_HOST_OS.... */
 

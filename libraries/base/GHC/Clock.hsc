@@ -1,17 +1,25 @@
 {-# LANGUAGE Trustworthy #-}
 {-# LANGUAGE NoImplicitPrelude #-}
 
-module GHC.Event.Clock (getMonotonicTime) where
+module GHC.Clock
+    ( getMonotonicTime
+    , getMonotonicTimeNSec
+    ) where
 
 import GHC.Base
 import GHC.Real
 import Data.Word
 
 -- | Return monotonic time in seconds, since some unspecified starting point
+--
+-- @since 4.11.0.0
 getMonotonicTime :: IO Double
-getMonotonicTime = do w <- getMonotonicNSec
+getMonotonicTime = do w <- getMonotonicTimeNSec
                       return (fromIntegral w / 1000000000)
 
+-- | Return monotonic time in nanoseconds, since some unspecified starting point
+--
+-- @since 4.11.0.0
 foreign import ccall unsafe "getMonotonicNSec"
-    getMonotonicNSec :: IO Word64
+    getMonotonicTimeNSec :: IO Word64
 
