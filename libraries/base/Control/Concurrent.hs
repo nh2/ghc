@@ -405,12 +405,12 @@ threadWaitRead :: Fd -> IO ()
 threadWaitRead fd
 #if defined(mingw32_HOST_OS)
   -- we have no IO manager implementing threadWaitRead on Windows.
-  -- fdReady does the right thing, but we have to call it in a
-  -- separate thread, otherwise threadWaitRead won't be interruptible,
-  -- and this only works with -threaded.
-  -- TODO The above is probably no longer true now that `fdReady()`
-  --      is interruptible, so we can probably delete `withThread` everywhere.
-  | threaded  = withThread (waitFd fd False)
+  -- fdReady does the right thing here..
+  -- In earlier implementations, we had to to call it in a
+  -- separate thread, otherwise threadWaitRead wouldn't be interruptible,
+  -- and this only worked with -threaded; but now (since #8684),
+  -- hWaitForInput is interruptible.
+  | threaded  = waitFd fd False
   | otherwise = case fd of
                   0 -> do _ <- hWaitForInput stdin (-1)
                           return ()
@@ -431,7 +431,7 @@ threadWaitRead fd
 threadWaitWrite :: Fd -> IO ()
 threadWaitWrite fd
 #if defined(mingw32_HOST_OS)
-  | threaded  = withThread (waitFd fd True)
+  | threaded  = waitFd fd True
   | otherwise = errorWithoutStackTrace "threadWaitWrite requires -threaded on Windows"
 #else
   = GHC.Conc.threadWaitWrite fd
@@ -487,15 +487,6 @@ threadWaitWriteSTM fd
 
 #if defined(mingw32_HOST_OS)
 foreign import ccall unsafe "rtsSupportsBoundThreads" threaded :: Bool
-
-withThread :: IO a -> IO a
-withThread io = do
-  m <- newEmptyMVar
-  _ <- mask_ $ forkIO $ try io >>= putMVar m
-  x <- takeMVar m
-  case x of
-    Right a -> return a
-    Left e  -> throwIO (e :: IOException)
 
 waitFd :: Fd -> Bool -> IO ()
 waitFd fd write = do
