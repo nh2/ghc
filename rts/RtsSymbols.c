@@ -78,6 +78,7 @@
       SymI_HasProto(setWin32ProgArgv)                    \
       SymI_HasProto(rts_InstallConsoleEvent)             \
       SymI_HasProto(rts_ConsoleHandlerDone)              \
+      SymI_HasProto(rts_interruptOSThreadEvent)          \
       SymI_HasProto(atexit)                              \
       RTS_WIN32_ONLY(SymI_NeedsProto(__chkstk_ms))       \
       RTS_WIN64_ONLY(SymI_NeedsProto(___chkstk_ms))      \
@@ -563,6 +564,7 @@
       SymI_HasProto(genericRaise)                                       \
       SymI_HasProto(getProgArgv)                                        \
       SymI_HasProto(getFullProgArgv)                                    \
+      SymI_HasProto(getProcessElapsedTime)                              \
       SymI_HasProto(getStablePtr)                                       \
       SymI_HasProto(foreignExportStablePtr)                             \
       SymI_HasProto(hs_init)                                            \

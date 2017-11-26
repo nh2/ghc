@@ -290,10 +290,20 @@ interruptOSThread (OSThreadId id)
         sysErrorBelch("interruptOSThread: OpenThread");
         stg_exit(EXIT_FAILURE);
     }
+
     pCSIO = (PCSIO) GetProcAddress(GetModuleHandle(TEXT("Kernel32.dll")),
                                    "CancelSynchronousIo");
     if ( NULL != pCSIO ) {
-        pCSIO(hdl);
+        // CancelSynchronousIo() need not necessarily succeed, as there may not
+        // necessarily be an IO operation running that can be cancelled,
+        // in which case we get `ERROR_NOT_FOUND`.
+        BOOL success = pCSIO(hdl);
+        IF_DEBUG(scheduler, debugBelch("CancelSynchronousIo() against thread ID %lu success: %d.\n", id, success));
+        if (!success && GetLastError() != ERROR_NOT_FOUND) {
+            sysErrorBelch(
+                "interruptOSThread: CancelSynchronousIo failed with error: %lu.",
+                GetLastError());
+        }
     } else {
         // Nothing to do, unfortunately
     }

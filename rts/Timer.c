@@ -41,6 +41,24 @@ static
 void
 handle_tick(int unused STG_UNUSED)
 {
+  // On Unix, already the fact that the timer signal came in as a POSIX
+  // signal will have interrupted syscalls with EINTR.
+  // But on Windows, not all syscalls can be interrupted with POSIX signals.
+  // For those, we manually signal an event on which they listen.
+  //
+  // See also:
+  //   - `interruptOSThreadEvent` in `struct Task` in `Task.h`
+  //   - `rts_interruptOSThreadEvent()` in `Task.h`
+  //
+  // This is necessary only in the non-threaded RTS, where we have only a
+  // single thread and that one is the one we have to wake up.
+  // In the threaded RTS, there is no need to interrupt syscalls to continue
+  // with other execution, and it also wouldn't be clear which Task/thread to
+  // wake up (`rts_interruptOSThreadEvent()` refers to the *current* Task).
+#if defined(mingw32_HOST_OS) && !defined(THREADED_RTS)
+  SetEvent(rts_interruptOSThreadEvent());
+#endif
+
   handleProfTick();
   if (RtsFlags.ConcFlags.ctxtSwitchTicks > 0) {
       ticks_to_ctxt_switch--;

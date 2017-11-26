@@ -160,8 +160,10 @@ typedef StgInt64 Time;
 
 #if TIME_RESOLUTION == 1000000000
 // I'm being lazy, but it's awkward to define fully general versions of these
+#define TimeToMS(t)      ((t) / 1000000)
 #define TimeToUS(t)      ((t) / 1000)
 #define TimeToNS(t)      (t)
+#define MSToTime(t)      ((Time)(t) * 1000000)
 #define USToTime(t)      ((Time)(t) * 1000)
 #define NSToTime(t)      ((Time)(t))
 #else
@@ -177,6 +179,8 @@ INLINE_HEADER Time fsecondsToTime (double t)
 {
     return (Time)(t * TIME_RESOLUTION);
 }
+
+Time getProcessElapsedTime (void);
 
 /* -----------------------------------------------------------------------------
    Include everything STG-ish

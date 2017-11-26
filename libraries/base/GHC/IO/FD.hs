@@ -2,6 +2,7 @@
 {-# LANGUAGE CPP
            , NoImplicitPrelude
            , BangPatterns
+           , InterruptibleFFI
   #-}
 {-# OPTIONS_GHC -Wno-identities #-}
 -- Whether there are identities depends on the platform
@@ -42,6 +43,8 @@ import GHC.IO.BufferedIO
 import qualified GHC.IO.Device
 import GHC.IO.Device (SeekMode(..), IODeviceType(..))
 import GHC.Conc.IO
+import GHC.Conc.Sync (yield)
+import GHC.Clock (getMonotonicTimeNSec)
 import GHC.IO.Exception
 #ifdef mingw32_HOST_OS
 import GHC.Windows
@@ -388,20 +391,92 @@ setNonBlockingMode fd set = do
   return fd{ fdIsNonBlocking = fromEnum set }
 #endif
 
+-- If `msecs < 0`, it means "no timeout".
+fdReadyRetry :: FD -> Bool -> Int64 -> Bool -> IO Bool
+fdReadyRetry fd write msecs isSocket =
+  -- Note in the below, we avoid calls to `getMonotonicTimeNSec`
+  -- when msecs <= 0 because time is not relevant in that case.
+  if msecs <= 0
+    then loop msecs 0
+    else do
+      startTime <- fmap fromIntegral getMonotonicTimeNSec
+      loop (msecs * 1000000) (startTime + msecs * 1000000)
+  where
+    infinite = msecs < 0
+    -- Usually we'd make `endNsecs` a maybe but ideally we want to
+    -- avoid any boxing here so that `loop` can be as tight
+    -- as possible. So `endNsecs` is ignored if `msecs <= 0`.
+    -- If `remainingNsecs < 0`, it means "no timeout".
+    loop :: Int64 -> Int64 -> IO Bool
+    loop !remainingNsecs !endNsecs = do
+      let remainingMsecs
+            | remainingNsecs <= 0 = remainingNsecs
+            | otherwise           = remainingNsecs `quot` 1000000 +
+            -- If there's a fractional part of milliseconds,
+            -- we need to wait 1 ms more, so that we never wait too little.
+                                    if remainingNsecs `rem` 1000000 == 0
+                                      then 0 else 1
+      res <- fdReady (fdFD fd) (if write then 1 else 0)
+                               remainingMsecs
+                               (if isSocket then 1 else 0)
+      -- Note: In both the threaded and the non-threaded RTS, in all cases
+      -- where we return from fdReady(), and decide to loop and call it again,
+      -- we have to call `interruptible` first, so that functions like
+      -- `timeout` (which `throwTo` an exception) get a chance to cancel it.
+      --
+      -- Additionally, in the non-threaded RTS, we have to call `yield`,
+      -- such that functions like `timeout` actually get the chance to run
+      -- produce that exception.
+      -- See:
+      --   https://ghc.haskell.org/trac/ghc/ticket/8684#comment:21
+      --
+      -- This is not ideal; ideally the `interruptible` would happen
+      -- automatically, and in the non-threaded RTS, the scheduler would yield
+      -- for us automatically (e.g. if `errno = EINTR`, or when returning from
+      -- a `ccall interruptible`?), but in absence of such features,
+      -- `fdReady()` being interuptible is important enough that we special-
+      -- case its interruptibility here.
+      let makeInterruptible
+            | threaded = interruptible $ return ()
+            | otherwise = interruptible yield
+      let loopWithRemainingTime = do
+            makeInterruptible
+            nowNsecs <- fmap fromIntegral getMonotonicTimeNSec
+            -- Note: We do not check if the remaining time to wait is <= 0
+            --       here to stop looping; instead, we call `fdReady` again
+            --       with timeout 0 when that happens.
+            --       This is to ensure what's written in the note
+            --       [Guaranteed syscall time spent] in `fdReady()`.
+            loop (max 0 (endNsecs - nowNsecs)) endNsecs
+      case res of
+        1 -> return True -- ready
+        0
+          | infinite -> makeInterruptible >> loop remainingNsecs 0
+          | remainingNsecs == 0 -> return False -- not ready
+          | otherwise -> loopWithRemainingTime
+        -1 -> do
+          err <- getErrno
+          if err /= eINTR
+            then throwErrno "GHC.IO.FD.fdReadyRetry"
+            else do
+              -- EINTR happened
+              if msecs <= 0
+                then makeInterruptible >> loop remainingNsecs 0
+                else loopWithRemainingTime
+        _ -> error $ "fdReadyRetry: got unexpected result: " ++ show res
+
 ready :: FD -> Bool -> Int -> IO Bool
 ready fd write msecs = do
-  r <- throwErrnoIfMinus1Retry "GHC.IO.FD.ready" $
-          fdReady (fdFD fd) (fromIntegral $ fromEnum $ write)
-                            (fromIntegral msecs)
+  fdReadyRetry fd write (fromIntegral msecs :: Int64) isSocket
+  where
 #if defined(mingw32_HOST_OS)
-                          (fromIntegral $ fromEnum $ fdIsSocket fd)
+    isSocket = fdIsSocket fd
 #else
-                          0
+    isSocket = False
 #endif
-  return (toEnum (fromIntegral r))
 
-foreign import ccall safe "fdReady"
-  fdReady :: CInt -> CInt -> CInt -> CInt -> IO CInt
+foreign import ccall interruptible "fdReady"
+  fdReady :: CInt -> CBool -> Int64 -> CBool -> IO CInt
 
 -- ---------------------------------------------------------------------------
 -- Terminal-related stuff
@@ -495,10 +570,24 @@ indicates that there's no data, we call threadWaitRead.
 
 -}
 
+-- | Retries the given action while errno returns EINTR.
+-- Like `throwErrnoIfMinus1Retry`, but without the throwing.
+errnoIfMinus1Retry :: IO CInt -> IO CInt
+errnoIfMinus1Retry f =
+  do
+    res <- f
+    if res == -1
+      then do
+        err <- getErrno
+        if err == eINTR
+          then errnoIfMinus1Retry f
+          else return res
+      else return res
+
 readRawBufferPtr :: String -> FD -> Ptr Word8 -> Int -> CSize -> IO Int
 readRawBufferPtr loc !fd buf off len
   | isNonBlocking fd = unsafe_read -- unsafe is ok, it can't block
-  | otherwise    = do r <- throwErrnoIfMinus1 loc
+  | otherwise    = do r <- throwErrnoIfMinus1Retry loc
                                 (unsafe_fdReady (fdFD fd) 0 0 0)
                       if r /= 0
                         then read
@@ -515,7 +604,7 @@ readRawBufferPtr loc !fd buf off len
 readRawBufferPtrNoBlock :: String -> FD -> Ptr Word8 -> Int -> CSize -> IO Int
 readRawBufferPtrNoBlock loc !fd buf off len
   | isNonBlocking fd  = unsafe_read -- unsafe is ok, it can't block
-  | otherwise    = do r <- unsafe_fdReady (fdFD fd) 0 0 0
+  | otherwise    = do r <- errnoIfMinus1Retry $ unsafe_fdReady (fdFD fd) 0 0 0
                       if r /= 0 then safe_read
                                 else return 0
        -- XXX see note [nonblock]
@@ -531,7 +620,7 @@ readRawBufferPtrNoBlock loc !fd buf off len
 writeRawBufferPtr :: String -> FD -> Ptr Word8 -> Int -> CSize -> IO CInt
 writeRawBufferPtr loc !fd buf off len
   | isNonBlocking fd = unsafe_write -- unsafe is ok, it can't block
-  | otherwise   = do r <- unsafe_fdReady (fdFD fd) 1 0 0
+  | otherwise   = do r <- errnoIfMinus1Retry $ unsafe_fdReady (fdFD fd) 1 0 0
                      if r /= 0
                         then write
                         else do threadWaitWrite (fromIntegral (fdFD fd)); write
@@ -546,7 +635,7 @@ writeRawBufferPtr loc !fd buf off len
 writeRawBufferPtrNoBlock :: String -> FD -> Ptr Word8 -> Int -> CSize -> IO CInt
 writeRawBufferPtrNoBlock loc !fd buf off len
   | isNonBlocking fd = unsafe_write -- unsafe is ok, it can't block
-  | otherwise   = do r <- unsafe_fdReady (fdFD fd) 1 0 0
+  | otherwise   = do r <- errnoIfMinus1Retry $ unsafe_fdReady (fdFD fd) 1 0 0
                      if r /= 0 then write
                                else return 0
   where
@@ -561,8 +650,11 @@ writeRawBufferPtrNoBlock loc !fd buf off len
 isNonBlocking :: FD -> Bool
 isNonBlocking fd = fdIsNonBlocking fd /= 0
 
+-- This function must only be called with a timeout of 0,
+-- so that it cannot block the runtime.
+-- If you want to use a timeout, use `fdReady` instead.
 foreign import ccall unsafe "fdReady"
-  unsafe_fdReady :: CInt -> CInt -> CInt -> CInt -> IO CInt
+  unsafe_fdReady :: CInt -> CBool -> Int64 -> CBool -> IO CInt
 
 #else /* mingw32_HOST_OS.... */
 

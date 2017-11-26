@@ -195,6 +195,11 @@ freeTask (Task *task)
         stgFree(incall);
     }
 
+#if defined(mingw32_HOST_OS)
+    CloseHandle(task->interruptOSThreadEvent);
+    task->interruptOSThreadEvent = NULL;
+#endif
+
     stgFree(task);
 }
 
@@ -240,6 +245,15 @@ newTask (rtsBool worker)
         }
     }
     RELEASE_LOCK(&all_tasks_mutex);
+
+#if defined(mingw32_HOST_OS)
+    task->interruptOSThreadEvent = CreateEvent(
+        NULL,               // default security attributes
+        FALSE,              // automatic-reset event
+        FALSE,              // initial state is nonsignaled
+        TEXT("interruptOSThreadEvent")  // object name
+    );
+#endif
 
     return task;
 }
@@ -481,12 +495,28 @@ interruptWorkerTask (Task *task)
 {
   ASSERT(osThreadId() != task->id);    // seppuku not allowed
   ASSERT(task->incall->suspended_tso); // use this only for FFI calls
+#if defined(mingw32_HOST_OS)
+  BOOL success = SetEvent(task->interruptOSThreadEvent);
+  if (!success) {
+    sysErrorBelch("failed to signal interruptOSThreadEvent");
+    stg_exit(EXIT_FAILURE);
+  }
+#endif
   interruptOSThread(task->id);
   debugTrace(DEBUG_sched, "interrupted worker task %#" FMT_HexWord64,
              serialisableTaskId(task));
 }
 
 #endif /* THREADED_RTS */
+
+#if defined(mingw32_HOST_OS)
+HANDLE
+rts_interruptOSThreadEvent ()
+{
+    Task* task = allocTask();
+    return task->interruptOSThreadEvent;
+}
+#endif
 
 #ifdef DEBUG
 
