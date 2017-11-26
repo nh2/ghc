@@ -4,6 +4,7 @@
            , UnboxedTuples
            , ScopedTypeVariables
            , RankNTypes
+           , InterruptibleFFI
   #-}
 {-# OPTIONS_GHC -Wno-deprecations #-}
 -- kludge for the Control.Concurrent.QSem, Control.Concurrent.QSemN
@@ -121,6 +122,8 @@ import Foreign.C.Types
 import Foreign.C
 import System.IO
 import Data.Functor ( void )
+import Data.Int ( Int64 )
+import Data.Word ( Word8 )
 #else
 import qualified GHC.Conc
 #endif
@@ -406,7 +409,9 @@ threadWaitRead fd
   -- fdReady does the right thing, but we have to call it in a
   -- separate thread, otherwise threadWaitRead won't be interruptible,
   -- and this only works with -threaded.
-  | threaded  = withThread (waitFd fd 0)
+  -- TODO The above is probably no longer true now that `fdReady()`
+  --      is interruptible, so we can probably delete `withThread` everywhere.
+  | threaded  = withThread (waitFd fd False)
   | otherwise = case fd of
                   0 -> do _ <- hWaitForInput stdin (-1)
                           return ()
@@ -427,7 +432,7 @@ threadWaitRead fd
 threadWaitWrite :: Fd -> IO ()
 threadWaitWrite fd
 #ifdef mingw32_HOST_OS
-  | threaded  = withThread (waitFd fd 1)
+  | threaded  = withThread (waitFd fd True)
   | otherwise = errorWithoutStackTrace "threadWaitWrite requires -threaded on Windows"
 #else
   = GHC.Conc.threadWaitWrite fd
@@ -443,7 +448,7 @@ threadWaitReadSTM :: Fd -> IO (STM (), IO ())
 threadWaitReadSTM fd
 #ifdef mingw32_HOST_OS
   | threaded = do v <- newTVarIO Nothing
-                  mask_ $ void $ forkIO $ do result <- try (waitFd fd 0)
+                  mask_ $ void $ forkIO $ do result <- try (waitFd fd False)
                                              atomically (writeTVar v $ Just result)
                   let waitAction = do result <- readTVar v
                                       case result of
@@ -467,7 +472,7 @@ threadWaitWriteSTM :: Fd -> IO (STM (), IO ())
 threadWaitWriteSTM fd
 #ifdef mingw32_HOST_OS
   | threaded = do v <- newTVarIO Nothing
-                  mask_ $ void $ forkIO $ do result <- try (waitFd fd 1)
+                  mask_ $ void $ forkIO $ do result <- try (waitFd fd True)
                                              atomically (writeTVar v $ Just result)
                   let waitAction = do result <- readTVar v
                                       case result of
@@ -493,16 +498,14 @@ withThread io = do
     Right a -> return a
     Left e  -> throwIO (e :: IOException)
 
-waitFd :: Fd -> CInt -> IO ()
+waitFd :: Fd -> Bool -> IO ()
 waitFd fd write = do
-   throwErrnoIfMinus1_ "fdReady" $
-        fdReady (fromIntegral fd) write iNFINITE 0
+   throwErrnoIfMinus1Retry_ "fdReady" $
+        fdReady (fromIntegral fd) (if write then 1 else 0) (-1) 0
 
-iNFINITE :: CInt
-iNFINITE = 0xFFFFFFFF -- urgh
-
-foreign import ccall safe "fdReady"
-  fdReady :: CInt -> CInt -> CInt -> CInt -> IO CInt
+foreign import ccall interruptible "fdReady"
+  -- The `Word8` should be `CBool`, but GHC 8.0 doesn't have that yet.
+  fdReady :: CInt -> Word8 -> Int64 -> Word8 -> IO CInt
 #endif
 
 -- ---------------------------------------------------------------------------

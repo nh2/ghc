@@ -25,6 +25,7 @@
 
 #include "HsFFI.h"
 
+#include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <math.h>
@@ -153,7 +154,7 @@ extern HsWord64 getMonotonicUSec(void);
 #endif
 
 /* in inputReady.c */
-extern int fdReady(int fd, int write, int msecs, int isSock);
+extern int fdReady(int fd, bool write, int64_t msecs, bool isSock);
 
 /* -----------------------------------------------------------------------------
    INLINE functions.
