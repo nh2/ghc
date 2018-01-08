@@ -17,6 +17,7 @@
 #include "Schedule.h"
 #include "Hash.h"
 #include "Trace.h"
+#include "Itimer.h"
 
 #include <string.h>
 
@@ -24,11 +25,10 @@
 #include <signal.h>
 #endif
 
-#if defined(mingw32_HOST_OS)
-// Initialising to 0, because:
-//   "Note that no thread identifier will ever be 0"
-// From https://msdn.microsoft.com/en-us/library/windows/desktop/ms686746(v=vs.85).aspx
-OSThreadId mainThreadId = 0;
+#if USE_PTHREAD_FOR_ITIMER || defined(mingw32_HOST_OS)
+// Initialising to NULL so that we can assert against it where we use this.
+OSThreadId* mainThreadId = NULL;
+OSThreadId mainThreadIdValue = 0;
 #endif
 
 // Task lists and global counters.
@@ -74,8 +74,10 @@ void
 initTaskManager (void)
 {
     if (!tasksInitialized) {
-#if defined(mingw32_HOST_OS)
-        mainThreadId = GetCurrentThreadId();
+#if USE_PTHREAD_FOR_ITIMER || defined(mingw32_HOST_OS)
+        ASSERT(mainThreadId == 0);
+        mainThreadIdValue = osThreadId();
+        mainThreadId = &mainThreadIdValue;
 #endif
         taskCount = 0;
         workerCount = 0;

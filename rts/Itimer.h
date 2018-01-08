@@ -8,9 +8,11 @@
 
 #pragma once
 
+#include "BeginPrivate.h"
+
 /*
- * The interval timer is used for profiling and for context switching in the
- * threaded build.  Though POSIX 1003.1b includes a standard interface for
+ * The interval timer is used for profiling and for context switching.
+ * Though POSIX 1003.1b includes a standard interface for
  * such things, no one really seems to be implementing them yet.  Even
  * Solaris 2.3 only seems to provide support for @CLOCK_REAL@, whereas we're
  * keen on getting access to @CLOCK_VIRTUAL@.
@@ -19,35 +21,33 @@
  * seems to support.  So much for standards.
  */
 
-#include "PosixSource.h"
-#include "Rts.h"
-
 /*
  * timer_create doesn't exist and setitimer doesn't fire on iOS, so we're using
  * a pthreads-based implementation. It may be to do with interference with the
  * signals of the debugger. Revisit. See #7723.
  */
 #if defined(ios_HOST_OS)
-#define USE_PTHREAD_FOR_ITIMER
-#endif
-
+#define USE_PTHREAD_FOR_ITIMER 1
 /*
  * We want to avoid using the SIGALRM signals whenever possible as these signals
  * interrupt system calls (see #10840) and can be overridden by user code. On
  * Darwin we can use a dedicated thread and usleep.
  */
-#if defined(darwin_HOST_OS)
-#define USE_PTHREAD_FOR_ITIMER
-#endif
-
+#elif defined(darwin_HOST_OS)
+#define USE_PTHREAD_FOR_ITIMER 1
 /*
  * On Linux in the threaded RTS we can use timerfd_* (introduced in Linux
  * 2.6.25) and a thread instead of alarm signals. It avoids the risk of
  * interrupting syscalls (see #10840) and the risk of being accidentally
  * modified in user code using signals.
  */
-#if defined(linux_HOST_OS) && defined(THREADED_RTS) && HAVE_SYS_TIMERFD_H
-#define USE_PTHREAD_FOR_ITIMER
+#elif defined(linux_HOST_OS) && defined(THREADED_RTS) && HAVE_SYS_TIMERFD_H
+#define USE_PTHREAD_FOR_ITIMER 1
+#else
+/*
+ * On all other platforms, we don't use a pthread for the timer.
+ */
+#define USE_PTHREAD_FOR_ITIMER 0
 #endif
 
 
@@ -68,3 +68,5 @@ ghc-stage2: timer_create: Not owner
    here */
 #undef USE_TIMER_CREATE
 #endif /* solaris2_HOST_OS */
+
+#include "EndPrivate.h"

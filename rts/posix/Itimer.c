@@ -6,10 +6,13 @@
  *
  * ---------------------------------------------------------------------------*/
 
-#include "Itimer.h"
+#include "PosixSource.h"
+#include "Rts.h"
+
+#include "../Itimer.h"
 
 // Select the variant to use
-#if defined(USE_PTHREAD_FOR_ITIMER)
+#if USE_PTHREAD_FOR_ITIMER
 #include "itimer/Pthread.c"
 #elif defined(USE_TIMER_CREATE)
 #include "itimer/TimerCreate.c"

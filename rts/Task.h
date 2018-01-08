@@ -12,6 +12,7 @@
 #pragma once
 
 #include "GetTime.h"
+#include "Itimer.h"
 
 #include "BeginPrivate.h"
 
@@ -200,8 +201,8 @@ isWorker (Task *task)
 // The OS Thread ID of the main thread of the process.
 // In the non-threaded RTS, this is the thread ID on which
 // any Haskell code is running.
-#if defined(mingw32_HOST_OS)
-extern OSThreadId mainThreadId;
+#if USE_PTHREAD_FOR_ITIMER || defined(mingw32_HOST_OS)
+extern OSThreadId* mainThreadId;
 #endif
 
 // Linked list of all tasks.
