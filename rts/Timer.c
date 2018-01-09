@@ -78,18 +78,28 @@ handle_tick(int unused STG_UNUSED)
           // automatically as a side effect of the timer signal:
           // The timer signal is a POSIX signal here, and POSIX signals interrupt
           // blocking syscalls on Unix (they return -1 and set EINTR).
+          // TODO: Update comment above with new info from https://phabricator.haskell.org/D42#119714
           //
           // But on Windows, not all blocking syscalls can be interrupted with
           // POSIX signals.
-          // To interrupt those, we call `interruptWorkerTask()` here, to make
-          // context-switching work on the non-threaded RTS on Windows.
+          // To interrupt those, we call `interruptOSThread()` here, and signal
+          // the `interruptOSThreadEvent`, to make context-switching work on
+          // the non-threaded RTS on Windows.
           //
           // See also:
-          //   - `interruptWorkerTask()` in `Task.h`
+          //   - `interruptOSThread()` in `win32/OSThreads.c`
           //   - `interruptOSThreadEvent` in `struct Task` in `Task.h`
           //   - `rts_getInterruptOSThreadEvent()` in `Task.h`
         #if defined(mingw32_HOST_OS) && !defined(THREADED_RTS)
-          interruptWorkerTask();
+          SetEvent(rts_getInterruptOSThreadEvent());
+          // Because on Windows the timer signal is set up with
+          // `CreateTimerQueueTimer(... , WT_EXECUTEINTIMERTHREAD, ...)`,
+          // `handle_tick()` as its callback runs in its own thread.
+          // We want to interrupt the (single/only) thread that runs Haskell
+          // and may be stuck in FFI calls; that is `mainThreadId`.
+          ASSERT(mainThreadId != 0);
+          interruptOSThread(mainThreadId);
+          // TODO Do this also for Darwin and iOS as per https://phabricator.haskell.org/D42#119714
         #endif
       }
   }

@@ -197,6 +197,13 @@ isWorker (Task *task)
     return (task->worker && task->incall->prev_stack == NULL);
 }
 
+// The OS Thread ID of the main thread of the process.
+// In the non-threaded RTS, this is the thread ID on which
+// any Haskell code is running.
+#if defined(mingw32_HOST_OS)
+extern OSThreadId mainThreadId;
+#endif
+
 // Linked list of all tasks.
 //
 extern Task *all_tasks;

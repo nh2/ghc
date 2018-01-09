@@ -24,6 +24,13 @@
 #include <signal.h>
 #endif
 
+#if defined(mingw32_HOST_OS)
+// Initialising to 0, because:
+//   "Note that no thread identifier will ever be 0"
+// From https://msdn.microsoft.com/en-us/library/windows/desktop/ms686746(v=vs.85).aspx
+OSThreadId mainThreadId = 0;
+#endif
+
 // Task lists and global counters.
 // Locks required: all_tasks_mutex.
 Task *all_tasks = NULL;
@@ -67,6 +74,9 @@ void
 initTaskManager (void)
 {
     if (!tasksInitialized) {
+#if defined(mingw32_HOST_OS)
+        mainThreadId = GetCurrentThreadId();
+#endif
         taskCount = 0;
         workerCount = 0;
         currentWorkerCount = 0;
