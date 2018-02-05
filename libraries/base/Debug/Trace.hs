@@ -53,7 +53,18 @@ import GHC.IO.Encoding
 import GHC.Ptr
 import GHC.Show
 import GHC.Stack
-import Data.List
+import GHC.List
+
+-- | Copy-paste of `Data.List.partition`, so that we don't have to
+-- import "Data.List" here, making it possible to use "Debug.Trace"
+-- from "Data.List".
+partition               :: (a -> Bool) -> [a] -> ([a],[a])
+{-# INLINE partition #-}
+partition p xs = foldr (select p) ([],[]) xs
+
+select :: (a -> Bool) -> a -> ([a], [a]) -> ([a], [a])
+select p x ~(ts,fs) | p x       = (x:ts,fs)
+                    | otherwise = (ts, x:fs)
 
 -- $tracing
 --

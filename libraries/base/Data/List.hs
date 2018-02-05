@@ -215,7 +215,11 @@ import Data.Traversable
 import Data.OldList hiding ( all, and, any, concat, concatMap, elem, find,
                              foldl, foldl1, foldl', foldr, foldr1, mapAccumL,
                              mapAccumR, maximum, maximumBy, minimum, minimumBy,
-                             length, notElem, null, or, product, sum )
+                             length, notElem, null, or, product, sum,
+                             nub, nubBy )
+import qualified Data.OldList as OldList
+import Debug.Trace (trace)
+import GHC.Show
 
 import GHC.Base ( Bool(..), Eq((==)), otherwise )
 
@@ -240,3 +244,10 @@ isSubsequenceOf []    _                    = True
 isSubsequenceOf _     []                   = False
 isSubsequenceOf a@(x:a') (y:b) | x == y    = isSubsequenceOf a' b
                                | otherwise = isSubsequenceOf a b
+
+
+nub :: (Eq a) => [a] -> [a]
+nub l = trace ("nub called with this many elements: " ++ show (length l)) (OldList.nubBy (==) l)
+
+nubBy :: (a -> a -> Bool) -> [a] -> [a]
+nubBy f l = trace ("nubBy called with this many elements: " ++ show (length l)) (OldList.nubBy f l)
