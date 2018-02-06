@@ -1979,7 +1979,11 @@ summariseFile hsc_env old_summaries file mb_phase obj_allowed maybe_buf
         obj_fingerprint <-
             if isObjectTarget (hscTarget (hsc_dflags hsc_env))
                || obj_allowed -- bug #1205
-                then liftIO $ Just <$> getFileHash (ml_obj_file location)
+                then do
+                  exists <- doesFileExist (ml_obj_file location)
+                  if exists
+                    then liftIO $ Just <$> getFileHash (ml_obj_file location)
+                    else return Nothing
                 else return Nothing
 
         hi_timestamp <- maybeGetIfaceDate dflags location
@@ -2148,7 +2152,11 @@ summariseModule hsc_env old_summary_map is_boot (L loc wanted_mod)
         obj_fingerprint <-
             if isObjectTarget (hscTarget (hsc_dflags hsc_env))
                || obj_allowed -- bug #1205
-                then liftIO $ Just <$> getFileHash (ml_obj_file location)
+                then do
+                  exists <- doesFileExist (ml_obj_file location)
+                  if exists
+                    then liftIO $ Just <$> getFileHash (ml_obj_file location)
+                    else return Nothing
                 else return Nothing
 
         hi_timestamp <- maybeGetIfaceDate dflags location

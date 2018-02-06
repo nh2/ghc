@@ -604,8 +604,16 @@ hscIncrementalFrontend
                     case m_tc_result of
                     Nothing
                      | mi_used_th iface && not stable -> do
+                        let directImports :: [ModuleName]
+                            directImports = [ unLoc locatedModuleName | (_, locatedModuleName) <- ms_srcimps mod_summary ++ ms_textual_imps mod_summary ]
+
+                        dflags <- getDynFlags
+                        liftIO $ debugTraceMsg dflags 0 (text "nh2 compile direct deps:" <+> ppr directImports)
+
                         let moduleDeps :: [(ModuleName, Bool)]
-                            moduleDeps = dep_mods (mi_deps iface)
+                            -- moduleDeps = dep_mods (mi_deps iface)
+                            moduleDeps = [ (moduleName, False) | moduleName <- directImports ]
+
                         dflags <- getDynFlags
                         liftIO $ debugTraceMsg dflags 0 (text "nh2 compile hi deps:" <+> ppr moduleDeps)
 
@@ -623,25 +631,30 @@ hscIncrementalFrontend
 
                         deps_objs_hashes_changed <- forM moduleDeps $ \dep -> do
                           case Map.lookup dep nodeMap of
-                            Nothing -> error "nh2: dep not in node map"
+                            Nothing ->
+                              -- For Modules outside of the home package this happens, e.g.
+                              -- for Prelude.
+                              return False
                             Just summary -> do
                               let hsChangedSinceLastObjOutput = case ms_obj_date summary of
                                     Just t -> not (t >= ms_hs_date summary)
                                     Nothing -> error "ms_obj_date summary is Nothing"
 
+                              let objFilePath = ml_obj_file (ms_location summary)
+
                               -- TODO possibly should handle -fno-code as in the code we copied this from?
                               obj_timestamp_now <-
-                                  liftIO $ modificationTimeIfExists (ml_obj_file (ms_location summary))
+                                  liftIO $ modificationTimeIfExists objFilePath
 
-                              obj_fingerprint_now <-
-                                  liftIO $ getFileHash (ml_obj_file (ms_location summary))
+                              obj_fingerprint_now <- liftIO $ do
+                                  exists <- doesFileExist objFilePath
+                                  if exists
+                                      then Just <$> getFileHash objFilePath
+                                      else return Nothing
 
-                              let obj_hash_changed = Just obj_fingerprint_now /= ms_obj_fingerprint summary
+                              let obj_hash_changed = obj_fingerprint_now /= ms_obj_fingerprint summary
 
                               let obj_date_before_this_compilation = ms_obj_date summary
-
-                              let directImports :: [ModuleName]
-                                  directImports = [ unLoc locatedModuleName | (_, locatedModuleName) <- ms_srcimps summary ++ ms_textual_imps summary ]
 
                               liftIO $ debugTraceMsg dflags 0 $
                                 text "nh2 summary:" <+> ppr summary
@@ -658,22 +671,23 @@ hscIncrementalFrontend
                                   ]
                               return obj_hash_changed
 
-                        -- In the current state:
-                        -- The below ensures we don't compile downstream
-                        -- modules with "[TH]" when we only change comments
-                        -- (so the .o file of any imported module doesn't
-                        -- change).
-                        -- But:
-                        -- If we change the above so that we check only if
-                        -- .o file hashes of any _direct_ imports change
-                        -- (instead of recursive imports as `dep_mods` does),
-                        -- then this should be a strict improvement from
-                        -- "all recursive imports that use TH splices are recompiled" to
+                        -- The below ensures we don't compile all recursive downstream
+                        -- modules with "[TH]" when we change the module.
+                        -- The logic we have now,
                         -- "all direct imports that use TH splices are recompiled".
-                        --
-                        -- But how to obtain direct imports?
-                        -- Via `ms_srcimps ++ ms_textual_imps` from `ModSummary`?
+                        -- is better than what was there before,
+                        -- "all recursive imports that use TH splices are recompiled",
+                        -- but this isn't perfect yet:
+                        -- Ideally we'd not even compile direct imports if the TH slices
+                        -- used cannot change. But that needs more tracking machinery
+                        -- that we don't have yet, and an improvement from
+                        -- O(size of project) to O(number of direct imports) is already
+                        -- nice.
 
+                        liftIO $ debugTraceMsg dflags 0 $
+                          text "nh2 deps_objs_hashes_changed:" <+> ppr deps_objs_hashes_changed
+
+                        -- Old code was:
                         -- compile mb_old_hash (RecompBecause "TH")
                         if (or deps_objs_hashes_changed)
                           then compile mb_old_hash (RecompBecause "TH")
