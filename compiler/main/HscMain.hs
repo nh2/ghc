@@ -134,7 +134,7 @@ import CmmInfo
 import CodeOutput
 import InstEnv
 import FamInstEnv
-import Fingerprint      ( Fingerprint )
+import Fingerprint      ( Fingerprint, getFileHash )
 import Hooks
 import TcEnv
 
@@ -546,7 +546,7 @@ hscIncrementalFrontend :: Bool -- always do basic recompilation check?
                        -> ModSummary
                        -> SourceModified
                        -> Maybe ModIface  -- Old interface, if available
-                       -> (Int,Int)       -- (i,n) = module i of n (for msgs)
+                       -> (Int,Int)       -- (i,n) = Module i of n (for msgs)
                        -> Hsc (Either ModIface (FrontendResult, Maybe Fingerprint))
 
 hscIncrementalFrontend
@@ -603,8 +603,81 @@ hscIncrementalFrontend
                     -- one-shot mode.
                     case m_tc_result of
                     Nothing
-                     | mi_used_th iface && not stable ->
-                        compile mb_old_hash (RecompBecause "TH")
+                     | mi_used_th iface && not stable -> do
+                        let moduleDeps :: [(ModuleName, Bool)]
+                            moduleDeps = dep_mods (mi_deps iface)
+                        dflags <- getDynFlags
+                        liftIO $ debugTraceMsg dflags 0 (text "nh2 compile hi deps:" <+> ppr moduleDeps)
+
+                        let graph = hsc_mod_graph hsc_env
+                        let summaries = graph
+                        -- Almost copy pasted
+                        let hscSourceToIsBootBool :: HscSource -> Bool
+                            hscSourceToIsBootBool HsBootFile = True
+                            hscSourceToIsBootBool _ = False
+                        -- Almost copy pasted
+                        let msKey (ModSummary { ms_mod = mod, ms_hsc_src = boot })
+                              = (moduleName mod, hscSourceToIsBootBool boot)
+
+                        let nodeMap = Map.fromList [ (msKey s, s) | s <- summaries]
+
+                        deps_objs_hashes_changed <- forM moduleDeps $ \dep -> do
+                          case Map.lookup dep nodeMap of
+                            Nothing -> error "nh2: dep not in node map"
+                            Just summary -> do
+                              let hsChangedSinceLastObjOutput = case ms_obj_date summary of
+                                    Just t -> not (t >= ms_hs_date summary)
+                                    Nothing -> error "ms_obj_date summary is Nothing"
+
+                              -- TODO possibly should handle -fno-code as in the code we copied this from?
+                              obj_timestamp_now <-
+                                  liftIO $ modificationTimeIfExists (ml_obj_file (ms_location summary))
+
+                              obj_fingerprint_now <-
+                                  liftIO $ getFileHash (ml_obj_file (ms_location summary))
+
+                              let obj_hash_changed = Just obj_fingerprint_now /= ms_obj_fingerprint summary
+
+                              let obj_date_before_this_compilation = ms_obj_date summary
+
+                              let directImports :: [ModuleName]
+                                  directImports = [ unLoc locatedModuleName | (_, locatedModuleName) <- ms_srcimps summary ++ ms_textual_imps summary ]
+
+                              liftIO $ debugTraceMsg dflags 0 $
+                                text "nh2 summary:" <+> ppr summary
+                                <+>
+                                vcat
+                                  [ text (".hs date         " ++ show (ms_hs_date summary))
+                                  , text ("old .o date " ++ show obj_date_before_this_compilation)
+                                  , text ("new .o date " ++ show obj_timestamp_now)
+                                  , text (".o hash     " ++ show (ms_obj_fingerprint summary))
+                                  , text (".hs changed since last .o output: " ++ show hsChangedSinceLastObjOutput)
+                                  , text (".o hash changed: " ++ show obj_hash_changed)
+                                  , text ""
+                                  , text ("direct imports") <+> ppr directImports
+                                  ]
+                              return obj_hash_changed
+
+                        -- In the current state:
+                        -- The below ensures we don't compile downstream
+                        -- modules with "[TH]" when we only change comments
+                        -- (so the .o file of any imported module doesn't
+                        -- change).
+                        -- But:
+                        -- If we change the above so that we check only if
+                        -- .o file hashes of any _direct_ imports change
+                        -- (instead of recursive imports as `dep_mods` does),
+                        -- then this should be a strict improvement from
+                        -- "all recursive imports that use TH splices are recompiled" to
+                        -- "all direct imports that use TH splices are recompiled".
+                        --
+                        -- But how to obtain direct imports?
+                        -- Via `ms_srcimps ++ ms_textual_imps` from `ModSummary`?
+
+                        -- compile mb_old_hash (RecompBecause "TH")
+                        if (or deps_objs_hashes_changed)
+                          then compile mb_old_hash (RecompBecause "TH")
+                          else skip iface
                     _ ->
                         skip iface
                 _ ->

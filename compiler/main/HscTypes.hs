@@ -2621,6 +2621,8 @@ data ModSummary
           -- ^ Timestamp of source file
         ms_obj_date     :: Maybe UTCTime,
           -- ^ Timestamp of object, if we have one
+        ms_obj_fingerprint :: Maybe Fingerprint,
+          -- ^ Fingerprint of object, if we have one
         ms_iface_date   :: Maybe UTCTime,
           -- ^ Timestamp of hi file, if we *only* are typechecking (it is
           -- 'Nothing' otherwise.

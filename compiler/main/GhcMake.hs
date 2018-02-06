@@ -39,6 +39,7 @@ import DriverPipeline
 import DynFlags
 import ErrUtils
 import Finder
+import Fingerprint
 import GhcMonad
 import HeaderInfo
 import HscTypes
@@ -1936,6 +1937,7 @@ summariseFile hsc_env old_summaries file mb_phase obj_allowed maybe_buf
                         else return Nothing
                   hi_timestamp <- maybeGetIfaceDate dflags location
                   return old_summary{ ms_obj_date = obj_timestamp
+                                    -- TODO nh2 update fingerprint here?
                                     , ms_iface_date = hi_timestamp }
            else
                 new_summary src_timestamp
@@ -1974,6 +1976,12 @@ summariseFile hsc_env old_summaries file mb_phase obj_allowed maybe_buf
                 then liftIO $ modificationTimeIfExists (ml_obj_file location)
                 else return Nothing
 
+        obj_fingerprint <-
+            if isObjectTarget (hscTarget (hsc_dflags hsc_env))
+               || obj_allowed -- bug #1205
+                then liftIO $ Just <$> getFileHash (ml_obj_file location)
+                else return Nothing
+
         hi_timestamp <- maybeGetIfaceDate dflags location
 
         extra_sig_imports <- findExtraSigImports hsc_env hsc_src mod_name
@@ -1990,6 +1998,7 @@ summariseFile hsc_env old_summaries file mb_phase obj_allowed maybe_buf
                              ms_textual_imps = the_imps ++ extra_sig_imports ++ required_by_imports,
                              ms_hs_date = src_timestamp,
                              ms_iface_date = hi_timestamp,
+                             ms_obj_fingerprint = obj_fingerprint,
                              ms_obj_date = obj_timestamp })
 
 findSummaryBySourceFile :: [ModSummary] -> FilePath -> Maybe ModSummary
@@ -2136,6 +2145,12 @@ summariseModule hsc_env old_summary_map is_boot (L loc wanted_mod)
               then getObjTimestamp location is_boot
               else return Nothing
 
+        obj_fingerprint <-
+            if isObjectTarget (hscTarget (hsc_dflags hsc_env))
+               || obj_allowed -- bug #1205
+                then liftIO $ Just <$> getFileHash (ml_obj_file location)
+                else return Nothing
+
         hi_timestamp <- maybeGetIfaceDate dflags location
 
         extra_sig_imports <- findExtraSigImports hsc_env hsc_src mod_name
@@ -2152,6 +2167,7 @@ summariseModule hsc_env old_summary_map is_boot (L loc wanted_mod)
                               ms_textual_imps = the_imps ++ extra_sig_imports ++ required_by_imports,
                               ms_hs_date   = src_timestamp,
                               ms_iface_date = hi_timestamp,
+                              ms_obj_fingerprint = obj_fingerprint,
                               ms_obj_date  = obj_timestamp })))
 
 
