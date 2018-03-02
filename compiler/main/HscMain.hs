@@ -629,6 +629,8 @@ hscIncrementalFrontend
 
                         let nodeMap = Map.fromList [ (msKey s, s) | s <- summaries]
 
+                        -- TODO This is not sufficient, we need to check this for all _recursive_ modules.
+                        --      See https://github.com/ghc/ghc/commit/b08b5232b74bf3aec676b8709c0ccb653025e08f#r27718190
                         deps_objs_hashes_changed <- forM moduleDeps $ \dep -> do
                           case Map.lookup dep nodeMap of
                             Nothing ->
