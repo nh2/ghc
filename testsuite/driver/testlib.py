@@ -67,6 +67,10 @@ def isStatsTest():
     opts = getTestOpts()
     return bool(opts.compiler_stats_range_fields or opts.stats_range_fields)
 
+def isPerfTest():
+    opts = getTestOpts()
+    return bool(opts.perf_range_fields)
+
 
 # This can be called at the top of a file of tests, to set default test options
 # for the following tests.
@@ -101,6 +105,9 @@ def expect_fail( name, opts ):
 
 def reqlib( lib ):
     return lambda name, opts, l=lib: _reqlib (name, opts, l )
+
+def reqexe( exe ):
+    return lambda name, opts, l=exe: _reqexe (name, opts, l )
 
 def stage1(name, opts):
     # See Note [Why is there no stage1 setup function?]
@@ -154,6 +161,26 @@ def _reqlib( name, opts, lib ):
 
     if not got_it:
         opts.expect = 'missing-lib'
+
+have_exe = {}
+
+def _reqexe( name, opts, exe, check_flag='--version' ):
+    if exe in have_exe:
+        got_it = have_exe[exe]
+    else:
+        p = subprocess.Popen([exe, check_flag],
+                             stdout=subprocess.PIPE,
+                             stderr=subprocess.PIPE,
+                             env=ghc_env)
+        # read from stdout and stderr to avoid blocking due to
+        # buffers filling
+        p.communicate()
+        r = p.wait()
+        got_it = r == 0
+        have_exe[exe] = got_it
+
+    if not got_it:
+        opts.expect = 'missing-exe'
 
 def req_haddock( name, opts ):
     if not config.haddock:
@@ -312,6 +339,14 @@ def extra_files(files):
 
 def _extra_files(name, opts, files):
     opts.extra_files.extend(files)
+
+# -----
+
+def instruction_count( num_upper_bound ):
+    return lambda name, opts, n=num_upper_bound: _instruction_count(name, opts, num_upper_bound);
+
+def _instruction_count( name, opts, num_upper_bound ):
+    opts.instruction_count_upper_bound = num_upper_bound
 
 # -----
 
@@ -733,7 +768,7 @@ def test_common_work(watcher, name, opts, func, args):
             not getTestOpts().skip \
             and (getTestOpts().only_ways == None or way in getTestOpts().only_ways) \
             and (config.cmdline_ways == [] or way in config.cmdline_ways) \
-            and (not (config.skip_perf_tests and isStatsTest())) \
+            and (not (config.skip_perf_tests and (isStatsTest() or isPerfTest()))) \
             and way not in getTestOpts().omit_ways
 
         # Which ways we are asked to skip
@@ -1092,8 +1127,52 @@ def compile_and_run__( name, way, top_mod, extra_mods, extra_hc_opts, backpack=0
         # we don't check the compiler's stderr for a compile-and-run test
         return simple_run( name, way, cmd, getTestOpts().extra_run_opts )
 
+def compile_and_run_with_perf__( name, way, top_mod, extra_mods, extra_hc_opts, backpack=0 ):
+    # print 'Compile and run, extra args = ', extra_hc_opts
+
+    result = extras_build( way, extra_mods, extra_hc_opts )
+    if badResult(result):
+       return result
+    extra_hc_opts = result['hc_opts']
+
+    if way.startswith('ghci'): # interpreted...
+        return interpreter_run(name, way, extra_hc_opts, top_mod)
+    else: # compiled...
+        result = simple_build(name, way, extra_hc_opts, 0, top_mod, 1, 1, backpack = backpack)
+        if badResult(result):
+            return result
+
+        cmd = 'perf stat ./' + name;
+
+        # we don't check the compiler's stderr for a compile-and-run test
+        return simple_run( name, way, cmd, getTestOpts().extra_run_opts )
+
 def compile_and_run( name, way, extra_hc_opts ):
     return compile_and_run__( name, way, '', [], extra_hc_opts)
+
+def compile_and_run_with_perf( name, way, extra_hc_opts ):
+    opts = getTestOpts()
+    opts.ignore_stderr = True
+    setLocalTestOpts(opts)
+    result = compile_and_run_with_perf__( name, way, '', [], extra_hc_opts)
+    stderr_path = in_testdir(add_suffix(name, 'run.stderr'))
+    # TODO use `perf stat --output` instead
+    with open(stderr_path) as f:
+        stderr = f.read()
+    # Extract "instructions" line from `perf` output
+    instructions_line = [l for l in stderr.splitlines() if 'instructions' in l][0]
+    # The instructions_line looks like this:
+    #       4,366,691      instructions      #    0.89  insn per cycle
+    num_instructions = int(instructions_line.split()[0].replace(',', ''))
+    print(num_instructions)
+    print(opts.instruction_count_upper_bound)
+    if num_instructions > opts.instruction_count_upper_bound:
+        print('perf instructions are too high:')
+        result = failBecause('perf instructions not good enough', tag='perf')
+        if badResult(result):
+            return result
+
+    return result
 
 def multimod_compile_and_run( name, way, top_mod, extra_hc_opts ):
     return compile_and_run__( name, way, top_mod, [], extra_hc_opts)

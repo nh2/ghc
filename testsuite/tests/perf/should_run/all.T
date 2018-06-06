@@ -574,3 +574,9 @@ test('T14936',
                        (wordsize(64), 51792, 5) ])],
      compile_and_run,
      ['-O2'])
+
+test('PerfEmpty',
+     [reqexe('perf'),
+      instruction_count(4333956)],
+     compile_and_run_with_perf,
+     ['-O2'])
